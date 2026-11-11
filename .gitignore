@@ -4,6 +4,7 @@
 
 # 仓库自身
 !/.gitignore
+!/README.md
 
 # 根目录：服务端、首页生成器、启动脚本、测试
 !/serve.py
@@ -12,6 +13,7 @@
 !/mobile_api.py
 !/serve.bat
 !/serve-lan.bat
+!/serve.command
 !/package.json
 !/test_autobuild.py
 !/test_serve_auth.py
