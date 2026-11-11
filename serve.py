@@ -524,7 +524,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _course_segment(name):
         """一级目录是否可能是课程：与 build_catalog.scan / BuildQueue.allowed 一致。"""
         return not (name.startswith(("_", ".")) or name.endswith("_old")
-                    or name == "assets")
+                    or name in ("assets", "template"))
 
     def translate_path(self, path):
         """课程文件夹外置时，把 /<课程名>/... 映射到 data_dir，其余仍走服务根。
@@ -1313,7 +1313,7 @@ def parse_args(argv=None):
     ap.add_argument("--gen-password", action="store_true", help="打印强随机口令后退出")
     ap.add_argument("--revoke-sessions", action="store_true", help="作废所有会话后退出")
     ap.add_argument("--manifest", default=None,
-                    help="课程清单，默认 <root>/_导航模版/course_manifest.json")
+                    help="课程清单，默认 <root>/template/nav/course_manifest.json")
     ap.add_argument("--no-autobuild", action="store_true",
                     help="关闭「首次点击按需生成阅读器」")
     ap.add_argument("--build-jobs", type=int, default=4, help="构建阅读器的并行线程数")
@@ -1384,7 +1384,7 @@ def create_server(cfg):
     # 动态首页 + 按需构建：模板/清单缺失时自动退化为纯静态服务（测试临时目录走这条分支）
     httpd.site = None
     httpd.build_queue = None
-    if os.path.isfile(os.path.join(root, "_导航模版", "build_catalog.py")):
+    if os.path.isfile(os.path.join(root, "template", "nav", "build_catalog.py")):
         try:
             site = site_generator.SiteGenerator(
                 root, manifest_path=getattr(cfg, "manifest", None),

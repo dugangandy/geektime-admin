@@ -3,18 +3,18 @@
 # 批量构建「极客时间」课程阅读器
 #
 # 用法：
-#   bash _阅读器模板/build_all.sh              # 构建清单里的全部课程
-#   bash _阅读器模板/build_all.sh Redis        # 只跑名字里含 Redis 的课程
+#   bash template/reader/build_all.sh              # 构建清单里的全部课程
+#   bash template/reader/build_all.sh Redis        # 只跑名字里含 Redis 的课程
 #
 # 说明：
 #   - 自动切到「极客时间」目录，不依赖从哪运行
-#   - 单门失败不影响其它课程，失败详情写到 _阅读器模板/build_all.log
+#   - 单门失败不影响其它课程，失败详情写到 template/reader/build_all.log
 # ============================================================
 set -o pipefail
 
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 export PYTHONIOENCODING=utf-8
-LOG="_阅读器模板/build_all.log"
+LOG="template/reader/build_all.log"
 : > "$LOG"
 
 FILTER="${1:-}"
@@ -27,7 +27,7 @@ run() {
     return
   fi
   local out
-  if out=$(python "_阅读器模板/build.py" "$name" "$@" 2>&1); then
+  if out=$(python "template/reader/build.py" "$name" "$@" 2>&1); then
     local info
     info=$(printf '%s' "$out" | grep -o '[0-9]* 组 / [0-9]* 讲' | tail -1)
     printf 'OK   %s  %s\n' "$name" "$info"

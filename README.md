@@ -31,17 +31,18 @@
 ├── test_serve_auth.py          # 鉴权 / 路由 单测
 ├── test_mobile_api.py          # 手机端 API 单测
 ├── .gitignore                  # 白名单：只放行程序代码/文档/模板/清单/测试
-├── _导航模版/
-│   ├── build_catalog.py        # 首页数据层 + 渲染层（服务端复用，也可 CLI 直接跑）
-│   ├── catalog_template.html   # 首页模板（样式 + 筛选 JS）
-│   ├── course_manifest.json    # 115 门权威清单（作者/头衔/封面/讲数/学习人数）
-│   ├── build_nav.py            # 导航页生成器
-│   └── template.html           # 页面模板
-├── _阅读器模板/
-│   ├── build.py                # 单门课程 → reader/ 构建器
-│   ├── build_all.sh            # 批量构建（可传课程名过滤）
-│   ├── index.html, assets/     # 阅读器外壳与样式脚本
-│   └── migrate_pages.py, relink_catalog.py, sync_ui.py   # 页面迁移 / 目录重链 / UI 同步
+├── template/
+│   ├── nav/
+│   │   ├── build_catalog.py    # 首页数据层 + 渲染层（服务端复用，也可 CLI 直接跑）
+│   │   ├── catalog_template.html  # 首页模板（样式 + 筛选 JS）
+│   │   ├── course_manifest.json   # 115 门权威清单（作者/头衔/封面/讲数/学习人数）
+│   │   ├── build_nav.py        # 导航页生成器
+│   │   └── template.html       # 页面模板
+│   └── reader/
+│       ├── build.py            # 单门课程 → reader/ 构建器
+│       ├── build_all.sh        # 批量构建（可传课程名过滤）
+│       ├── index.html, assets/ # 阅读器外壳与样式脚本
+│       └── migrate_pages.py, relink_catalog.py, sync_ui.py   # 页面迁移 / 目录重链 / UI 同步
 ├── android/                    # Kotlin 客户端与 Gradle 工程
 │   ├── app/src/main/           # Kotlin 源码、资源、article.css
 │   ├── tools/                  # build-apk.js、bump-version.js
@@ -60,14 +61,14 @@
 └── .mobile/progress.json       # 手机端学习进度，不入库
 ```
 
-课程目录支持三种布局：分章节目录、扁平 `html/` + 音频/PDF、纯 Markdown（含 `images/` 图片）。详见 `_阅读器模板/build.py` 头部说明。
+课程目录支持三种布局：分章节目录、扁平 `html/` + 音频/PDF、纯 Markdown（含 `images/` 图片）。详见 `template/reader/build.py` 头部说明。
 
 ## 环境依赖
 
 | 组件 | 依赖 |
 | --- | --- |
-| `serve.py`、`site_generator.py`、`mobile_api.py`、`_导航模版/build_catalog.py` | Python 3，纯标准库 |
-| `_阅读器模板/build.py` | `beautifulsoup4` 必需；`mutagen`（音频时长）、`markdown`（md 正文）、`pymupdf`（PDF 页数）可选 |
+| `serve.py`、`site_generator.py`、`mobile_api.py`、`template/nav/build_catalog.py` | Python 3，纯标准库 |
+| `template/reader/build.py` | `beautifulsoup4` 必需；`mutagen`（音频时长）、`markdown`（md 正文）、`pymupdf`（PDF 页数）可选 |
 | `gen_html.py` | `requests` / `loguru` / `jinja2`（仅历史脚本，服务不依赖） |
 | Android 客户端 | JDK 17+、Gradle 8.7+、Android SDK platform 34 / build-tools 34.0.0、Node.js、adb |
 
@@ -78,13 +79,13 @@ pip install mutagen markdown pymupdf    # 可选
 
 ## 数据准备
 
-1. 把课程放到**课程数据目录**下的一级子目录，一个目录一门课，目录名即课程名。默认该目录就是本仓库根目录；也可以放到别的磁盘/目录，启动时指定即可。以 `_` / `.` 开头、`_old` 结尾，以及名为 `assets` 的目录会被自动跳过。
+1. 把课程放到**课程数据目录**下的一级子目录，一个目录一门课，目录名即课程名。默认该目录就是本仓库根目录；也可以放到别的磁盘/目录，启动时指定即可。以 `_` / `.` 开头、`_old` 结尾，以及名为 `assets`、`template` 的目录会被自动跳过。
 
    ```bash
    python serve.py 8888 . --data-dir "D:/极客时间课程"
    ```
 
-   外部目录里**只放各门课程的子目录**（含各自的 `html/`、`mp3/`、`pdf/`、`reader/` 等）；`catalog.html`、`assets/covers/`、`_导航模版/`、`_阅读器模板/`、`auth.json`、`index.html` 等仍在仓库根目录。课程访问地址始终是 `/<课程名>/...`，服务端会把该前缀映射到数据目录，前端与 Android 客户端无需改动。首次点击「待生成」课程时，`reader/` 会构建到数据目录里对应的课程下。目录不存在时启动会明确报错；`--set-password` 等口令操作不依赖课程目录。
+   外部目录里**只放各门课程的子目录**（含各自的 `html/`、`mp3/`、`pdf/`、`reader/` 等）；`catalog.html`、`assets/covers/`、`template/`、`auth.json`、`index.html` 等仍在仓库根目录。课程访问地址始终是 `/<课程名>/...`，服务端会把该前缀映射到数据目录，前端与 Android 客户端无需改动。首次点击「待生成」课程时，`reader/` 会构建到数据目录里对应的课程下。目录不存在时启动会明确报错；`--set-password` 等口令操作不依赖课程目录。
 
 2. 可选：放一份 `catalog.html`（官网课程列表存档），用于补作者/头衔/讲数/学习人数等元数据，并为 CLI 提供封面下载地址。缺失时程序仍能运行，只是元数据与封面信息变少。
 3. 可选：给单门课加 `course.json` 覆写元数据：
@@ -99,8 +100,8 @@ pip install mutagen markdown pymupdf    # 可选
 4. 可选：跑一次首页生成器，下载封面并生成静态首页：
 
    ```bash
-   python _导航模版/build_catalog.py --dry-run   # 只打印统计，不写文件
-   python _导航模版/build_catalog.py            # 刷新 index.html + 下载封面到 assets/covers/
+   python template/nav/build_catalog.py --dry-run   # 只打印统计，不写文件
+   python template/nav/build_catalog.py            # 刷新 index.html + 下载封面到 assets/covers/
    ```
 
 ## 部署
@@ -121,7 +122,7 @@ python serve.py --revoke-sessions     # 作废所有会话（不改口令）
 python serve.py 8888 . --bind 127.0.0.1
 ```
 
-浏览器打开 `http://127.0.0.1:8888/`，登录页为 `/__auth/login`；会话默认空闲 7 天、绝对 30 天。启动时会打印 `home: dynamic (N 门课程) autobuild=on`。若 `_导航模版/build_catalog.py` 不存在，首页会自动回退到静态 `index.html`。
+浏览器打开 `http://127.0.0.1:8888/`，登录页为 `/__auth/login`；会话默认空闲 7 天、绝对 30 天。启动时会打印 `home: dynamic (N 门课程) autobuild=on`。若 `template/nav/build_catalog.py` 不存在，首页会自动回退到静态 `index.html`。
 
 课程数据目录的优先级：`--data-dir` > 环境变量 `GK_DATA_DIR` > 第二个位置参数 `root`（服务根）。不指定时课程与代码同目录，行为不变；两者不同时启动日志会多打印一行 `courses: <数据目录> (external data dir)`。Windows cmd 下可用 `set GK_DATA_DIR=D:\极客时间课程` 设置环境变量。
 
@@ -163,7 +164,7 @@ Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（�
 
 ## 首页与按需构建
 
-- 数据合并：本地一级课程目录 ∪ `_导航模版/course_manifest.json` 的 115 门清单；本地没有的显示「敬请期待」。
+- 数据合并：本地一级课程目录 ∪ `template/nav/course_manifest.json` 的 115 门清单；本地没有的显示「敬请期待」。
 - 元数据优先级：`course.json` > `CATEGORY_MAP` / `catalog.html` > manifest 补空。
 - 课程状态：`reader`（直接打开）/ `nav`（旧导航页）/ `pending`（待生成）/ `building`（生成中）/ `failed`（可重试）/ `none`（清单占位）。
 - 首次点击「待生成」课程 → `/__build/<课程名>` 触发后台构建 → 占位页轮询 `/__build/status/<课程名>` → 完成后跳转 `reader/index.html`。构建成功后首页缓存自动失效。
@@ -172,17 +173,17 @@ Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（�
 
 ```bash
 # 首页：统计 / 生成
-python _导航模版/build_catalog.py --dry-run
-python _导航模版/build_catalog.py "E:/.../极客时间" --title "极客时间 · 课程总目录" --out index.html
-python _导航模版/build_catalog.py --data-dir "D:/极客时间课程"   # 课程外置，首页仍写到仓库根目录
-python _导航模版/build_catalog.py --no-manifest        # 只扫描本地课程目录
+python template/nav/build_catalog.py --dry-run
+python template/nav/build_catalog.py "E:/.../极客时间" --title "极客时间 · 课程总目录" --out index.html
+python template/nav/build_catalog.py --data-dir "D:/极客时间课程"   # 课程外置，首页仍写到仓库根目录
+python template/nav/build_catalog.py --no-manifest        # 只扫描本地课程目录
 
 # 单门课程构建离线阅读器
-python _阅读器模板/build.py "<课程目录>" --title "课程名" --author "作者" --jobs 8
+python template/reader/build.py "<课程目录>" --title "课程名" --author "作者" --jobs 8
 
 # 批量构建（可传名字过滤）
-bash _阅读器模板/build_all.sh
-bash _阅读器模板/build_all.sh Redis
+bash template/reader/build_all.sh
+bash template/reader/build_all.sh Redis
 ```
 
 `build.py` 产物为 `<课程>/reader/` 下的 `index.html`、`assets/`、`data/catalog.js`、`pages/NNN.html`；重复执行幂等，不改动课程正文。

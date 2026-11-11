@@ -42,7 +42,7 @@ class CollectCase(unittest.TestCase):
         (self.root / "空目录").mkdir()
         write(self.root / "assets" / "covers" / "待生成.webp", b"RIFF____WEBP")
 
-        self.manifest = self.root / "_导航模版" / "course_manifest.json"
+        self.manifest = self.root / "template" / "nav" / "course_manifest.json"
         write(self.manifest, json.dumps({"version": 1, "courses": [
             {"name": "有阅读器", "dir": "backend", "state": "done",
              "href": "有阅读器/reader/index.html", "cover": "有阅读器.webp",
@@ -116,7 +116,7 @@ class BuildQueueCase(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="gk-queue-"))
         (self.root / "课程A" / "html").mkdir(parents=True)
         self.queue = site_generator.BuildQueue(
-            self.root, build_py=HERE / "_阅读器模板" / "build.py")
+            self.root, build_py=HERE / "template" / "reader" / "build.py")
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)

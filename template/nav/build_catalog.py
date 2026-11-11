@@ -19,7 +19,7 @@
 
 用法
 ----
-    # 最简：在 _导航模版 下运行，默认扫描上一级目录（即「极客时间」）
+    # 最简：在 template/nav 下运行，默认扫描上两级目录（即「极客时间」）
     python build_catalog.py
 
     # 指定目录 / 标题 / 主题色 / 输出文件
@@ -33,7 +33,7 @@
 
 参数
 ----
-    dir           服务根目录（写 index.html / 封面 / 读 catalog.html），默认脚本上一级
+    dir           服务根目录（写 index.html / 封面 / 读 catalog.html），默认脚本上两级
     --data-dir    课程文件夹所在目录，默认与 dir 相同
     --content-dir 课程正文子目录名，默认 html（仅在无 reader 时用于兜底统计讲数）
     --title       页面大标题，默认 "<根目录名> · 课程总目录"
@@ -51,7 +51,7 @@
 注意
 ----
     Windows 控制台是 GBK，输出中文请带 PYTHONIOENCODING=utf-8。
-    以 _ 或 . 开头的目录（如 _导航模版、_阅读器模板）会被跳过，不作为课程。
+    以 _ 或 . 开头的目录，以及 template、assets 会被跳过，不作为课程。
 """
 
 import argparse
@@ -477,7 +477,7 @@ def scan(root, content_dir_name, web_meta=None):
             continue
         if p.name.endswith("_old"):      # 重复课程的旧目录备份，不计入总目录
             continue
-        if p.name == "assets":           # 站点资源目录（顶栏 logo 等），不是课程
+        if p.name in ("assets", "template"):  # 站点资源 / 模板目录，不是课程
             continue
 
         reader = p / "reader" / "index.html"
@@ -1010,7 +1010,7 @@ def write_static_index(root, text, out_name="index.html"):
 
 def main():
     ap = argparse.ArgumentParser(add_help=True, description="生成分类版课程总目录 index.html")
-    ap.add_argument("dir", nargs="?", default=None, help="服务根目录，默认脚本目录的上一级")
+    ap.add_argument("dir", nargs="?", default=None, help="服务根目录，默认脚本目录的上两级")
     ap.add_argument("--data-dir", default=None,
                     help="课程文件夹所在目录，默认与 dir 相同（课程外置时指定）")
     ap.add_argument("--content-dir", default="html", help="课程正文子目录名，默认 html")
@@ -1026,7 +1026,7 @@ def main():
     args = ap.parse_args()
 
     here = Path(__file__).resolve().parent
-    root = Path(args.dir).expanduser().resolve() if args.dir else here.parent
+    root = Path(args.dir).expanduser().resolve() if args.dir else here.parent.parent
     data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else root
     if not root.is_dir():
         sys.exit(f"[错误] 目录不存在：{root}")
@@ -1085,7 +1085,7 @@ def main():
     print(f"[完成] {out_path}")
 
     # 顶栏官方 logo：与阅读器模板共用同一张图，复制到 <输出目录>/assets/logo.png
-    logo_src = Path(__file__).resolve().parent.parent / "_阅读器模板" / "assets" / "logo.png"
+    logo_src = Path(__file__).resolve().parent.parent / "reader" / "assets" / "logo.png"
     if logo_src.is_file():
         dst = out_path.parent / "assets" / "logo.png"
         dst.parent.mkdir(parents=True, exist_ok=True)

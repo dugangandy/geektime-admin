@@ -292,7 +292,7 @@ class AuthServerCase(unittest.TestCase):
         self.assertEqual(status, 401)
 
     def test_build_routes_disabled_without_templates(self):
-        # 临时目录没有 _导航模版，动态首页与按需构建自动退化
+        # 临时目录没有 template/nav，动态首页与按需构建自动退化
         self.assertIsNone(self.httpd.site)
         self.assertIsNone(self.httpd.build_queue)
         self.assertEqual(self.login()[0], 303)

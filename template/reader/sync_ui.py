@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-把「_阅读器模板」的壳与前端资源同步到所有已生成的阅读器。
+把「template/reader」的壳与前端资源同步到所有已生成的阅读器。
 
 只同步 UI 文件（index.html + assets/*），不碰 pages/ 里的正文数据，
 所以改完界面（结构 / 样式 / 脚本）跑一次即可全站生效，无需重新构建课程。
 
 用法：
-    python _阅读器模板/sync_ui.py                 # 同步全部阅读器
-    python _阅读器模板/sync_ui.py --check         # 只检查哪些阅读器落后
-    python _阅读器模板/sync_ui.py Redis 10x       # 只同步名字含这些片段的课程
+    python template/reader/sync_ui.py                 # 同步全部阅读器
+    python template/reader/sync_ui.py --check         # 只检查哪些阅读器落后
+    python template/reader/sync_ui.py Redis 10x       # 只同步名字含这些片段的课程
 """
 import argparse
 import filecmp
@@ -18,7 +18,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 TPL_INDEX = os.path.join(HERE, 'index.html')
 TPL_ASSETS = os.path.join(HERE, 'assets')
 

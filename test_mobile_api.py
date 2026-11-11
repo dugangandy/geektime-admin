@@ -95,7 +95,7 @@ class MobileApiCase(unittest.TestCase):
             {"name": "Course B", "dir": "ai", "author": "Bob",
              "identity": "", "lessons": 2, "learners_text": "3万人已学习"},
         ]}
-        put("_导航模版/course_manifest.json",
+        put("template/nav/course_manifest.json",
             json.dumps(manifest, ensure_ascii=False))
         put("assets/covers/Course A.webp", b"RIFFxxxxWEBPVP8 ")
         put("Course A/reader/data/catalog.js", _catalog("Course A", "Alice", [
@@ -533,7 +533,7 @@ class RealCourseDataCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = os.path.dirname(os.path.abspath(__file__))
-        manifest = os.path.join(cls.root, "_导航模版", "course_manifest.json")
+        manifest = os.path.join(cls.root, "template", "nav", "course_manifest.json")
         cls.available = os.path.isfile(manifest) and os.path.isfile(
             os.path.join(cls.root, "左耳听风", "reader", "data", "catalog.js"))
 

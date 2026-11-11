@@ -3,8 +3,8 @@
 把「课程总目录」index.html 里的课程卡片链接，指向各课程的离线阅读器。
 
 用法：
-    python _阅读器模板/relink_catalog.py            # 默认处理上一级（极客时间）目录
-    python _阅读器模板/relink_catalog.py <目录>
+    python template/reader/relink_catalog.py            # 默认处理上两级（极客时间）目录
+    python template/reader/relink_catalog.py <目录>
 
 规则：
     <课程>/index.html  ->  <课程>/reader/index.html   （仅当该课程已生成 reader 时）
@@ -20,7 +20,7 @@ import sys
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(HERE)
+ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(HERE))
 IDX = os.path.join(ROOT, 'index.html')
 
 TEXT_MAP = [

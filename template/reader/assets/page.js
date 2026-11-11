@@ -17,7 +17,7 @@
       '<div class="page-fail">正文加载失败：' +
       String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;') +
       '<br>常见原因是 <code>assets/page.js</code> 没有同步到本课程，' +
-      '请在「极客时间」目录跑一次 <code>python _阅读器模板/sync_ui.py</code>，然后刷新。</div>';
+      '请在「极客时间」目录跑一次 <code>python template/reader/sync_ui.py</code>，然后刷新。</div>';
   }
 
   var dataEl = document.getElementById('lesson-data');
@@ -37,7 +37,7 @@
   /* 数据结构版本：缺失按 v1 兼容；版本不符说明页面是旧模板生成的，给明显提示 */
   var schemaWarn = (D.v && D.v !== 1)
     ? '<div class="page-fail">数据版本不匹配（v=' + D.v + '，当前为 1），请重新生成：' +
-      'python _阅读器模板/build.py "课程目录"</div>'
+      'python template/reader/build.py "课程目录"</div>'
     : '';
 
   /* ---------------------------------------------------- 图标 */

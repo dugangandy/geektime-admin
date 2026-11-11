@@ -154,7 +154,7 @@ class CourseIndex:
         # 课程目录可与服务根分离；清单与封面仍在 root。
         self.data_dir = os.path.abspath(data_dir) if data_dir else self.root
         self.manifest_path = manifest_path or os.path.join(
-            self.root, "_导航模版", "course_manifest.json")
+            self.root, "template", "nav", "course_manifest.json")
         self._lock = threading.RLock()
         self._manifest_mtime = None
         self._courses = []

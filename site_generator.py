@@ -30,8 +30,8 @@ def _cat_key(name):
 
 
 def load_catalog(root):
-    """按路径加载 ``_导航模版/build_catalog.py``（目录名含中文，不用 import 语句）。"""
-    path = Path(root) / "_导航模版" / "build_catalog.py"
+    """按路径加载 ``template/nav/build_catalog.py``（非包目录，不用 import 语句）。"""
+    path = Path(root) / "template" / "nav" / "build_catalog.py"
     spec = importlib.util.spec_from_file_location("gk_build_catalog", path)
     if spec is None or spec.loader is None:
         raise ImportError("无法加载 %s" % path)
@@ -51,12 +51,12 @@ class SiteGenerator:
         self.data_dir = Path(data_dir).resolve() if data_dir else self.root
         self.catalog = load_catalog(self.root)
         self.manifest_path = (Path(manifest_path).resolve() if manifest_path
-                              else self.root / "_导航模版" / "course_manifest.json")
+                              else self.root / "template" / "nav" / "course_manifest.json")
         self.title = title or ("%s · 课程总目录" % self.root.name)
         self.color = color
         self.static_name = static_name
         self.static_min_interval = float(static_min_interval)
-        self.available = (self.root / "_导航模版" / "catalog_template.html").is_file()
+        self.available = (self.root / "template" / "nav" / "catalog_template.html").is_file()
 
         self._lock = threading.Lock()
         self._key = None
@@ -146,7 +146,7 @@ class BuildQueue:
         # 课程目录与构建器模板可以分属两处：reader/ 产物写回 data_dir。
         self.data_dir = Path(data_dir).resolve() if data_dir else self.root
         self.build_py = (Path(build_py) if build_py
-                         else self.root / "_阅读器模板" / "build.py")
+                         else self.root / "template" / "reader" / "build.py")
         self.jobs = max(1, int(jobs))
         self.timeout = max(60, int(timeout))
         self.on_done = on_done
@@ -164,7 +164,7 @@ class BuildQueue:
         for p in entries:
             if not p.is_dir():
                 continue
-            if p.name.startswith(_SKIP_PREFIX) or p.name.endswith("_old") or p.name == "assets":
+            if p.name.startswith(_SKIP_PREFIX) or p.name.endswith("_old") or p.name in ("assets", "template"):
                 continue
             names.add(p.name)
         return names

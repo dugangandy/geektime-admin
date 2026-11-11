@@ -105,17 +105,17 @@ class DataDirCase(unittest.TestCase):
                     f.write(data)
 
         # root：模板 / 清单 / 封面 / 口令 / 静态首页
-        os.makedirs(os.path.join(self.root, "_导航模版"), exist_ok=True)
+        os.makedirs(os.path.join(self.root, "template", "nav"), exist_ok=True)
         for name in ("build_catalog.py", "catalog_template.html"):
-            shutil.copy2(os.path.join(HERE, "_导航模版", name),
-                         os.path.join(self.root, "_导航模版", name))
-        put(self.root, "_导航模版/course_manifest.json", json.dumps(
+            shutil.copy2(os.path.join(HERE, "template", "nav", name),
+                         os.path.join(self.root, "template", "nav", name))
+        put(self.root, "template/nav/course_manifest.json", json.dumps(
             {"version": 1, "courses": [
                 {"name": COURSE, "dir": "backend", "author": "Alice",
                  "lessons": 1, "cover": "Course A.webp"}]},
             ensure_ascii=False))
-        os.makedirs(os.path.join(self.root, "_阅读器模板"), exist_ok=True)
-        put(self.root, "_阅读器模板/build.py", FAKE_BUILD_PY)
+        os.makedirs(os.path.join(self.root, "template", "reader"), exist_ok=True)
+        put(self.root, "template/reader/build.py", FAKE_BUILD_PY)
         put(self.root, "assets/covers/Course A.webp", b"RIFFxxxxWEBPVP8 ")
         put(self.root, "site.txt", "ROOT-ASSET")
         put(self.root, "index.html",
@@ -303,7 +303,7 @@ class DataDirCase(unittest.TestCase):
         queue = self.httpd.build_queue
         allowed = queue.allowed()
         self.assertIn("Course B", allowed)
-        self.assertNotIn("_导航模版", allowed)
+        self.assertNotIn("template", allowed)
         real, state = queue.request("Course B")
         self.assertIsNotNone(real)
         for _ in range(100):

@@ -10,9 +10,9 @@
 迁移后改 UI 只需 sync_ui.py。
 
 用法：
-    python _阅读器模板/migrate_pages.py --dry-run          # 只统计
-    python _阅读器模板/migrate_pages.py 超级访谈           # 迁移名字含该片段的课程
-    python _阅读器模板/migrate_pages.py                    # 迁移全部
+    python template/reader/migrate_pages.py --dry-run          # 只统计
+    python template/reader/migrate_pages.py 超级访谈           # 迁移名字含该片段的课程
+    python template/reader/migrate_pages.py                    # 迁移全部
 """
 import argparse
 import os
@@ -21,7 +21,7 @@ import sys
 from bs4 import BeautifulSoup
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import build  # noqa: E402  复用 PAGE_TPL / json_payload
 

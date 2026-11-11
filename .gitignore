@@ -20,11 +20,8 @@
 !/test_mobile_api.py
 !/test_data_dir.py
 
-# 导航模板与 115 门权威清单
-!/_导航模版/
-
-# 离线阅读器模板
-!/_阅读器模板/
+# 模板：导航（含 115 门权威清单）与离线阅读器
+!/template/
 
 # Android 客户端：只放行源码与构建脚本
 !/android/
