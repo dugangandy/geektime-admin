@@ -26,6 +26,7 @@
 ├── serve.bat                   # Windows 一键：本地服务 + SSH 反向隧道（公网入口）
 ├── serve-lan.bat               # Windows 一键：监听 0.0.0.0 供局域网访问
 ├── serve.command               # macOS 一键：本地服务 + SSH 隧道（断线自动重连）
+├── supervisor/gk-reader.conf   # macOS 常驻：交给 supervisord 托管 serve.command
 ├── package.json                # Android 打包 npm scripts
 ├── test_autobuild.py           # 首页生成 / 构建队列 单测
 ├── test_serve_auth.py          # 鉴权 / 路由 单测
@@ -146,7 +147,7 @@ python serve.py 8888 . --no-auth                        # 仅调试：关闭全�
 Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（若被 Gatekeeper 拦截，再执行 `xattr -d com.apple.quarantine serve.command`），之后双击 `serve.command`。两者都先启动本地 `127.0.0.1:8888`，再用 `ssh -R 8888:127.0.0.1:8888 root@139.198.29.121` 把端口映射到公网，访问 `http://139.198.29.121:8888/`。
 
 - 远端 sshd 需开启 `GatewayPorts yes`；脚本会清理僵死的 8888 监听（`fuser -k`）并复核远端绑定，失败最多重试 3 次，带 `ExitOnForwardFailure=yes` 与 `ServerAliveInterval=30`。
-- 两个脚本都复用已有的本地 8888 服务，且公网已可达时不动健康隧道。macOS 版额外支持隧道断线自动重连：`MAX_RETRIES=0 ./serve.command` 不限次数，`RETRY_BASE=5 RETRY_MAX_WAIT=60 ./serve.command` 可调退避；按 Ctrl-C 停止。
+- 两个脚本都复用已有的本地 8888 服务，且公网已可达时不动健康隧道。macOS 版额外支持隧道断线自动重连：`MAX_RETRIES=0 ./serve.command` 不限次数，`RETRY_BASE=5 RETRY_MAX_WAIT=60 ./serve.command` 可调退避；按 Ctrl-C 停止。想让它在后台常驻（不占终端），见 [7. 常驻运行：supervisorctl](#7-常驻运行supervisorctlmacos)。
 - 课程目录外置：`serve.bat` / `serve-lan.bat` 顶部改 `set "DATA_DIR=D:\..."`（纯 ASCII，勿写中文注释）；`serve.command` 顶部改 `COURSE_DIR="/Volumes/.../课程"`，或运行时 `GK_DATA_DIR="..." ./serve.command`。三个脚本都支持 `GK_DATA_DIR` 环境变量，留空则使用脚本所在目录；路径不存在时启动前即报错。
 - 课程文件**不上传**到远端，全部由本机服务提供；远端 80 端口是 nginx 默认站，不做反代。
 - 隧道下客户端 IP 恒为 `127.0.0.1`，按 IP 的限流退化为全局限流，切勿对回环地址做免登录豁免。
@@ -161,6 +162,25 @@ Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（�
 服务运行时会节流（默认 30 秒）把无构建状态的静态首页写到根目录 `index.html`，用 `file://` 双击即可浏览；该副本不含 `/__build` 链接。
 
 课程目录外置时，静态副本里的课程链接会自动加上指向数据目录的相对前缀（同一盘符）；跨盘符（如 `D:` 数据 + `E:` 代码）会退化为 `file:///` 绝对地址。这类链接绑定了本机目录结构，移动数据目录或换机器后需启动一次服务重新生成 `index.html`；在线访问（含手机端）不受此限制。
+
+### 7. 常驻运行：supervisorctl（macOS）
+
+不想占着一个终端窗口时，把 `serve.command` 交给本机已有的 supervisord（与 `xinghai-fm` 共用同一个实例、同一个 socket）：
+
+```bash
+CTL=~/.supervisor/venv/bin/supervisorctl
+CONF="/Volumes/Macintosh HD/Users/app/XinghaiFm/supervisor/supervisord.conf"
+
+$CTL -c "$CONF" status                 # gk-reader + xinghai-fm 一起看
+$CTL -c "$CONF" restart gk-reader
+$CTL -c "$CONF" stop gk-reader
+tail -f ~/.supervisor/logs/gk-reader.log
+```
+
+- 程序配置在仓库内 `supervisor/gk-reader.conf`（`autostart=true`、`autorestart=unexpected`、`stopasgroup/killasgroup=true`），通过 `~/.supervisor/conf.d/geektime-admin.conf` 软链接接入主配置的 `[include]`。**不要**往主配置里直接写全路径：supervisor 的 `[include] files` 按空白切分，`Macintosh HD` 里的空格会截断路径。
+- 改完配置执行 `$CTL -c "$CONF" reread && $CTL -c "$CONF" update` 生效；`supervisord` 本身由 LaunchAgent 守护，开机自启，不需要手动拉起。
+- supervisor 只管到 `serve.command` 这一层：本地 8888 服务与 SSH 隧道都是它的子进程，`stop` 会一并收掉；隧道断线仍由脚本内部按指数退避重连，不必重启程序。
+- 若公网 8888 已被别的实例（例如之前双击开的窗口）占用，脚本会打印提示后以 0 退出，`gk-reader` 随后进入 `FATAL`；先停掉那个实例再 `start`。停止时日志里的 `exit status 143` 是 SIGTERM 的正常记录。
 
 ## 首页与按需构建
 

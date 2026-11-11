@@ -23,6 +23,9 @@
 # 模板：导航（含 115 门权威清单）与离线阅读器
 !/template/
 
+# supervisor 程序配置（见 supervisor/gk-reader.conf）
+!/supervisor/
+
 # Android 客户端：只放行源码与构建脚本
 !/android/
 android/*
