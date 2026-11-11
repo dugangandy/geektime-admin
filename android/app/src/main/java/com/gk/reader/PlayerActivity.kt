@@ -70,12 +70,12 @@ class PlayerActivity : AppCompatActivity() {
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-        top.addView(Ui.icon(this, R.drawable.ic_chevron_down, c(R.color.text), 26) { finish() }
-            .apply { contentDescription = "收起" })
+        top.addView(Ui.icon(this, R.drawable.ic_chevron_down, c(R.color.text), 26, "收起") { finish() })
         top.addView(Ui.spacer(this))
         speedButton = Ui.text(this, "1.0x", 15f, c(R.color.text), true, 1).apply {
             setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -159,7 +159,7 @@ class PlayerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(18), 0, dp(8))
         }
-        controls.addView(Ui.icon(this, R.drawable.ic_replay15, c(R.color.text), 30) {
+        controls.addView(Ui.icon(this, R.drawable.ic_replay15, c(R.color.text), 30, "后退 15 秒") {
             PlayerController.seekBy(-15_000)
         })
         val playBox = FrameLayout(this).apply {
@@ -172,7 +172,7 @@ class PlayerActivity : AppCompatActivity() {
             setImageResource(R.drawable.ic_play)
             setColorFilter(Color.WHITE)
             setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = Ui.roundBg(this@PlayerActivity, Ui.ORANGE, 34f)
+            background = Ui.roundBg(this@PlayerActivity, Ui.orange(this@PlayerActivity), 34f)
             isClickable = true
             setOnClickListener { PlayerController.toggle() }
             contentDescription = "播放/暂停"
@@ -181,7 +181,7 @@ class PlayerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         controls.addView(playBox)
-        controls.addView(Ui.icon(this, R.drawable.ic_forward15, c(R.color.text), 30) {
+        controls.addView(Ui.icon(this, R.drawable.ic_forward15, c(R.color.text), 30, "前进 15 秒") {
             PlayerController.seekBy(15_000)
         })
         mainBox.addView(controls)
@@ -192,7 +192,7 @@ class PlayerActivity : AppCompatActivity() {
             setPadding(0, dp(8), 0, dp(4))
         }
         sleepButton = actionButton("定时", R.drawable.ic_timer) { showSleep() }
-        sleepLabel = sleepButton.getChildAt(1) as TextView
+        sleepLabel = sleepButton.tag as TextView
         bottom.addView(sleepButton)
         bottom.addView(actionButton("队列", R.drawable.ic_queue) { showQueue() })
         val prevNext = actionButton("下一讲", R.drawable.ic_next) {
@@ -256,6 +256,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         courseText.setTextColor(c(if (state.error != null) R.color.red else R.color.text_dim))
         toggle.setImageResource(if (state.playing) R.drawable.ic_pause else R.drawable.ic_play)
+        toggle.contentDescription = if (state.playing) "暂停" else "播放"
         val speedText = formatSpeed(state.speed)
         speedButton.text = speedText
         if (state.coverUrl != lastCover) {
@@ -280,17 +281,18 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun formatSpeed(speed: Float): String =
-        if (speed == speed.toInt().toFloat()) String.format(Locale.US, "%.1fx", speed)
-        else "${speed.toString().trimEnd('0').trimEnd('.')}x"
+        String.format(Locale.US, "%.2f", speed).trimEnd('0').trimEnd('.') + "x"
 
     private fun showSpeed() {
         val values = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
         val labels = values.map { formatSpeed(it) }.toTypedArray()
-        val current = values.indexOfFirst { it == PlayerController.state().speed }.coerceAtLeast(0)
+        val actual = PlayerController.state().speed
+        // 非预设倍速时返回 -1（不勾选），别用 coerceAtLeast(0) 假装选中了 0.75x
+        val current = values.indexOfFirst { kotlin.math.abs(it - actual) < 0.01f }
         AlertDialog.Builder(this)
             .setTitle("播放倍速")
             .setSingleChoiceItems(labels, current) { dialog, which ->
-                PlayerController.setSpeed(values[which])
+                PlayerController.setSpeed(this@PlayerActivity, values[which])
                 speedButton.text = labels[which]
                 dialog.dismiss()
             }

@@ -10,8 +10,11 @@ import android.widget.ImageView
 import android.widget.TextView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
@@ -22,23 +25,37 @@ object Covers {
 
     fun dir(ctx: Context): File = File(ctx.cacheDir, "covers").apply { if (!exists()) mkdirs() }
 
-    fun key(url: String): String {
+    /** 键必须含 origin：不同服务器下发的相对路径完全相同，否则会串文件。 */
+    fun key(ctx: Context, url: String): String {
+        val api = (ctx.applicationContext as GkApp).api
         val digest = MessageDigest.getInstance("SHA-1")
-        return digest.digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
+        return digest.digest(api.absolute(url).toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
-    fun file(ctx: Context, url: String): File? {
-        if (url.isEmpty()) return null
-        val target = File(dir(ctx), key(url))
+    suspend fun file(ctx: Context, url: String): File? = withContext(Dispatchers.IO) {
+        if (url.isEmpty()) return@withContext null
+        val target = File(dir(ctx), key(ctx, url))
         if (target.length() > 0) {
             target.setLastModified(System.currentTimeMillis())
-            return target
+            return@withContext target
         }
-        val tmp = File(dir(ctx), target.name + ".part")
+        val api = (ctx.applicationContext as GkApp).api
+        val call = api.client.newCall(Request.Builder().url(api.absolute(url)).build())
+        // 协程取消必须连带取消请求：execute() 是阻塞的，光取消 Job 会一直吊到 30s 超时
+        val handle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
         try {
-            val api = (ctx.applicationContext as GkApp).api
-            val request = Request.Builder().url(api.absolute(url)).build()
-            api.client.newCall(request).execute().use { res ->
+            download(call, target)
+        } finally {
+            handle?.dispose()
+        }
+    }
+
+    private fun download(call: Call, target: File): File? {
+        // 同一封面可能被多个 View 并发拉取，临时名必须唯一，否则字节交错后落成损坏缓存
+        val tmp = File(target.parentFile, target.name + "." + System.nanoTime() + ".part")
+        try {
+            call.execute().use { res ->
                 if (!res.isSuccessful) return null
                 val body = res.body ?: return null
                 if (body.contentLength() > MAX_BYTES) return null
@@ -74,15 +91,14 @@ object Covers {
         dir(ctx).listFiles()?.forEach { it.delete() }
     }
 
-    fun load(ctx: Context, url: String, name: String, view: CoverView) {
-        view.bindPlaceholder(name)
-        if (url.isEmpty()) return
-        scope.launch {
-            val file = file(ctx, url) ?: return@launch
-            val bitmap = decode(file, view.targetPx())
-            if (bitmap != null) {
-                view.post { view.show(bitmap, url) }
-            }
+    /** 只回传 Bitmap，Job 交给调用方随 View 生命周期取消，避免进程级 scope 吊住整棵 View 树。 */
+    fun load(ctx: Context, url: String, targetPx: Int, onReady: (Bitmap) -> Unit): Job? {
+        if (url.isEmpty()) return null
+        val app = ctx.applicationContext
+        return scope.launch {
+            val file = file(app, url) ?: return@launch
+            val bitmap = decode(file, targetPx) ?: return@launch
+            withContext(Dispatchers.Main) { onReady(bitmap) }
         }
     }
 
@@ -110,14 +126,15 @@ class CoverView(
     private val image = ImageView(context)
     private val initial = TextView(context)
     private var currentUrl = ""
+    private var loadJob: Job? = null
 
     init {
         clipToOutline = true
-        background = Ui.roundBg(context, 0x14F66121, cornerDp)
+        background = Ui.roundBg(context, Ui.orangeSoft(context, 0x14), cornerDp)
         image.scaleType = ImageView.ScaleType.CENTER_CROP
         addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         initial.gravity = Gravity.CENTER
-        initial.setTextColor(Ui.ORANGE)
+        initial.setTextColor(Ui.orange(context))
         initial.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, if (widthDp >= 72) 26f else 16f)
         initial.setTypeface(initial.typeface, android.graphics.Typeface.BOLD)
         addView(initial, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -137,7 +154,15 @@ class CoverView(
 
     fun load(url: String, name: String) {
         currentUrl = url
-        Covers.load(context, url, name, this)
+        loadJob?.cancel()
+        bindPlaceholder(name)
+        loadJob = Covers.load(context, url, targetPx()) { show(it, url) }
+    }
+
+    override fun onDetachedFromWindow() {
+        loadJob?.cancel()
+        loadJob = null
+        super.onDetachedFromWindow()
     }
 
     fun show(bitmap: Bitmap, url: String) {

@@ -105,6 +105,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // onCreate 无 session 时会 finish() 早退，mini 尚未初始化
+        if (!::mini.isInitialized) return
         mini.refresh()
         if (firstResume) {
             firstResume = false
@@ -115,6 +117,12 @@ class MainActivity : AppCompatActivity() {
             TAB_STUDY -> refreshStudy(true)
             TAB_ME -> refreshCacheSizes()
         }
+    }
+
+    override fun onDestroy() {
+        searchHandler.removeCallbacksAndMessages(null)
+        searchJob?.cancel()
+        super.onDestroy()
     }
 
     private fun maybeAskNotifications() {
@@ -185,11 +193,10 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                 isClickable = true
-                background = Ui.ripple(this@MainActivity, context.c(R.color.text), 0f)
+                background = Ui.ripple(this@MainActivity, android.graphics.Color.TRANSPARENT, 0f)
                 setOnClickListener { selectTab(i, true) }
             }
-            val icon = Ui.icon(this, icons[i], c(R.color.text_dim), 23)
-            icon.contentDescription = labels[i]
+            val icon = Ui.icon(this, icons[i], c(R.color.text_dim), 23, labels[i])
             val label = Ui.text(this, labels[i], 10f, c(R.color.text_dim), false, 1).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(2), 0, 0)
@@ -235,14 +242,15 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), 0, dp(6), 0)
+            minimumHeight = dp(52)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
         head.addView(Ui.text(this, "课程库", 22f, c(R.color.text), true, 1).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
-        head.addView(Ui.icon(this, R.drawable.ic_search, c(R.color.text), 22) {
+        head.addView(Ui.icon(this, R.drawable.ic_search, c(R.color.text), 22, "搜索") {
             searchInput.requestFocus()
             showKeyboard(searchInput)
         })
@@ -253,8 +261,9 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             background = Ui.roundBg(this@MainActivity, context.c(R.color.surface_alt), 20f)
             setPadding(dp(12), 0, dp(12), 0)
+            minimumHeight = dp(40)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(40)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 leftMargin = dp(16)
                 rightMargin = dp(16)
@@ -275,7 +284,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         }
         searchWrap.addView(searchInput)
-        val clear = Ui.icon(this, R.drawable.ic_close, c(R.color.text_dim), 16) {
+        val clear = Ui.icon(this, R.drawable.ic_close, c(R.color.text_dim), 16, "清空搜索") {
             searchInput.setText("")
         }
         clear.visibility = View.GONE
@@ -327,7 +336,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
         refresh = SwipeRefreshLayout(this).apply {
-            setColorSchemeColors(Ui.ORANGE)
+            setColorSchemeColors(Ui.orange(this@MainActivity))
             setOnRefreshListener { loadCourses(true) }
         }
         recycler = RecyclerView(this).apply {
@@ -476,7 +485,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(10) }
-            background = Ui.roundBg(this@MainActivity, 0x0CF66121, 12f)
+            background = Ui.roundBg(this@MainActivity, Ui.orangeSoft(this@MainActivity, 0x0C), 12f)
         }
         card.addView(Ui.text(this, "继续学习", 12f, c(R.color.orange), true, 1))
         card.addView(Ui.text(this, course.name, 15f, c(R.color.text), true, 1).apply {
@@ -497,7 +506,7 @@ class MainActivity : AppCompatActivity() {
         })
         val go = Ui.text(this, "继续", 13f, Color.WHITE, true, 1).apply {
             gravity = Gravity.CENTER
-            background = Ui.roundBg(this@MainActivity, Ui.ORANGE, 14f)
+            background = Ui.roundBg(this@MainActivity, Ui.orange(this@MainActivity), 14f)
             layoutParams = LinearLayout.LayoutParams(dp(64), dp(28)).apply { marginStart = dp(12) }
             isClickable = true
             setOnClickListener { openReader(course.id, last.lesson, course.name, last.title) }
@@ -670,7 +679,8 @@ class MainActivity : AppCompatActivity() {
 
         val cards = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         cards.addView(statCard("已学完", "${stats.lessonsRead}", "讲", 1f, 8))
-        cards.addView(statCard("累计学习", formatMinutes(stats.minutes), "", 1f, 8))
+        val (timeValue, timeUnit) = studyTime(stats.minutes)
+        cards.addView(statCard("累计学习", timeValue, timeUnit, 1f, 8))
         cards.addView(statCard("连续学习", "${stats.streak}", "天", 1f, 0))
         studyBox.addView(cards)
 
@@ -799,8 +809,10 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
-    private fun formatMinutes(minutes: Int): String =
-        if (minutes >= 60) String.format(Locale.US, "%.1f", minutes / 60f) else "$minutes"
+    /** 超过一小时就换单位，否则卡片上光一个「1.5」看不出是分钟还是小时。 */
+    private fun studyTime(minutes: Int): Pair<String, String> =
+        if (minutes >= 60) String.format(Locale.US, "%.1f", minutes / 60f) to "小时"
+        else "$minutes" to "分钟"
 
     // ------------------------------------------------------------ 我的
     private fun buildMePage(): LinearLayout {
@@ -895,9 +907,10 @@ class MainActivity : AppCompatActivity() {
         action: String?,
         onClick: (() -> Unit)? = null
     ): TextView {
-        val row = rowFrame(label, Ui.text(this, value, 13f, c(R.color.text_dim), false, 1).apply {
+        val valueView = Ui.text(this, value, 13f, c(R.color.text_dim), false, 1).apply {
             setPadding(dp(8), 0, 0, 0)
-        })
+        }
+        val row = rowFrame(label, valueView)
         if (action != null) {
             row.addView(Ui.text(this, action, 12f, c(R.color.orange), false, 1).apply {
                 setPadding(dp(10), dp(2), 0, dp(2))
@@ -908,7 +921,7 @@ class MainActivity : AppCompatActivity() {
             row.setOnClickListener { onClick() }
         }
         parent.addView(row)
-        return row.getChildAt(1) as TextView
+        return valueView
     }
 
     private fun themeLabel(): String = when (prefs.themeMode) {
@@ -948,7 +961,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("播放倍速")
             .setSingleChoiceItems(labels, current) { dialog, which ->
-                PlayerController.setSpeed(values[which])
+                PlayerController.setSpeed(this@MainActivity, values[which])
                 speedValue.text = labels[which]
                 dialog.dismiss()
             }

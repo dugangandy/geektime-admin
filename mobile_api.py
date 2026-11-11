@@ -15,6 +15,8 @@
     GET  /api/progress             /api/progress/{id}
     POST /api/progress             {"course": "...", "lesson": 1, "pct": 42, "pos": 10,
                                     "dur": 900, "read": false, "listen_sec": 30}
+                                   阅读端传 pos/dur（滚动像素），音频端传
+                                   audio_pos/audio_dur（毫秒）；缺省字段保留原值。
     GET  /api/stats
     GET  /api/search?q=...
 """
@@ -39,6 +41,7 @@ SERVER_NAME = "geektime-offline"
 SESSION_COOKIE = "gk_sess"
 MAX_API_BODY = 64 * 1024
 READ_THRESHOLD = 88.0
+AUDIO_MAX_MS = 86400 * 1000.0
 FAIL_DELAY = 0.3
 
 ID_RE = re.compile(r"^[0-9a-f]{12}$")
@@ -335,7 +338,8 @@ class ProgressStore:
             data = self._load()
             return json.loads(json.dumps(data, ensure_ascii=False))
 
-    def update(self, course_id, lesson, pct, pos, dur, read, listen_sec):
+    def update(self, course_id, lesson, pct, pos, dur, read, listen_sec,
+               audio_pos=None, audio_dur=None):
         now = int(time.time())
         with self._lock:
             data = self._load()
@@ -347,13 +351,22 @@ class ProgressStore:
                 "pct": 0.0, "pos": 0.0, "dur": 0.0, "read": False, "touched": 0}
             old_read = bool(rec.get("read"))
             new_read = old_read or bool(read) or pct >= READ_THRESHOLD
-            rec.update({
+            merged = {
                 "pct": round(max(float(rec.get("pct") or 0), pct), 1),
-                "pos": round(pos, 1),
-                "dur": round(dur, 1),
                 "read": new_read,
                 "touched": now,
-            })
+            }
+            # pos/dur 是阅读滚动像素，audio_pos/audio_dur 是音频毫秒，单位不同不可互相覆盖；
+            # 传 None 表示本次上报不涉及该字段，保留原值。
+            if pos is not None:
+                merged["pos"] = round(pos, 1)
+            if dur is not None:
+                merged["dur"] = round(dur, 1)
+            if audio_pos is not None:
+                merged["audio_pos"] = round(audio_pos, 1)
+            if audio_dur is not None:
+                merged["audio_dur"] = round(audio_dur, 1)
+            rec.update(merged)
             lessons[key] = rec
             course["last"] = {"lesson": lesson, "at": now}
             day = datetime.now().strftime("%Y-%m-%d")
@@ -601,9 +614,38 @@ class MobileAPI:
         h._send_json({"ok": True})
 
     # ------------------------------------------------------------ 课程
-    def _progress_for(self, cid):
-        snap = self.progress.snapshot()["courses"].get(cid) or {}
-        return snap.get("lessons") or {}, snap.get("last")
+    def _progress_for(self, cid, snap=None):
+        # snapshot() 会整份深拷贝进度库，列表接口必须先取一次再复用
+        courses = snap if snap is not None else self.progress.snapshot()["courses"]
+        entry = courses.get(cid) or {}
+        return entry.get("lessons") or {}, entry.get("last")
+
+    def _course_row(self, course, snap):
+        catalog = self.index.catalog(course)
+        lessons, last = self._progress_for(course["id"], snap)
+        read = sum(1 for item in lessons.values() if item.get("read"))
+        total = catalog["total"] or course["manifest_lessons"]
+        last_row = None
+        if last:
+            last_row = {"lesson": last.get("lesson"),
+                        "title": self._label(catalog, last.get("lesson")),
+                        "at": last.get("at", 0)}
+        return {
+            "id": course["id"],
+            "name": course["name"],
+            "author": course["author"],
+            "identity": course["identity"],
+            "category": course["category"],
+            "category_label": course["category_label"],
+            "badge": course["badge"],
+            "learners": course["learners"],
+            "total": total,
+            "cover_url": course["cover_url"],
+            "read": read,
+            "pct": int(round(read * 100.0 / total)) if total else 0,
+            "started": bool(read or lessons),
+            "last": last_row,
+        }
 
     def _courses(self, h, qs):
         self.index.ensure()
@@ -613,6 +655,7 @@ class MobileAPI:
             raise APIError(400, "bad_request", "query too long")
         counts = {}
         rows = []
+        snap = self.progress.snapshot()["courses"]
         for course in self.index.courses():
             counts[course["category"]] = counts.get(course["category"], 0) + 1
             if category and course["category"] != category:
@@ -620,31 +663,7 @@ class MobileAPI:
             if query and query not in course["name"].lower() \
                     and query not in course["author"].lower():
                 continue
-            catalog = self.index.catalog(course)
-            lessons, last = self._progress_for(course["id"])
-            read = sum(1 for item in lessons.values() if item.get("read"))
-            total = catalog["total"] or course["manifest_lessons"]
-            last_row = None
-            if last:
-                label = self._label(catalog, last.get("lesson"))
-                last_row = {"lesson": last.get("lesson"), "title": label,
-                            "at": last.get("at", 0)}
-            rows.append({
-                "id": course["id"],
-                "name": course["name"],
-                "author": course["author"],
-                "identity": course["identity"],
-                "category": course["category"],
-                "category_label": course["category_label"],
-                "badge": course["badge"],
-                "learners": course["learners"],
-                "total": total,
-                "cover_url": course["cover_url"],
-                "read": read,
-                "pct": int(round(read * 100.0 / total)) if total else 0,
-                "started": bool(read or lessons),
-                "last": last_row,
-            })
+            rows.append(self._course_row(course, snap))
         rows.sort(key=lambda r: (-(r["last"]["at"] if r["last"] else 0),))
         categories = [
             {"key": key, "label": CATEGORY_LABELS.get(key, key), "count": count}
@@ -766,8 +785,11 @@ class MobileAPI:
         next_row = (catalog["items"][pos + 1]
                     if 0 <= pos < len(catalog["items"]) - 1 else None)
         media = self._media(course, idx)
+        # 客户端 WebView 用它当 base，正文里的相对路径图片才能解析到讲次所在目录
+        page_rel = os.path.relpath(path, self.data_dir).replace(os.sep, "/")
         h._send_json({
             "idx": idx,
+            "page_url": "/" + urllib.parse.quote(page_rel, safe="/"),
             "total": int(data.get("total") or catalog["total"]),
             "kind": str(data.get("kind") or ""),
             "title": str(data.get("title") or (item or {}).get("label") or ""),
@@ -881,11 +903,16 @@ class MobileAPI:
         if not os.path.isfile(CourseIndex.page_path(course, lesson)):
             raise APIError(400, "bad_request", "lesson not found")
         pct = _clamp_float(data.get("pct"), 0.0, 100.0)
-        pos = _clamp_float(data.get("pos"), 0.0, 86400 * 24, 0.0)
-        dur = _clamp_float(data.get("dur"), 0.0, 86400 * 24, 0.0)
+        pos = _clamp_float(data["pos"], 0.0, 86400 * 24, 0.0) if "pos" in data else None
+        dur = _clamp_float(data["dur"], 0.0, 86400 * 24, 0.0) if "dur" in data else None
+        audio_pos = (_clamp_float(data["audio_pos"], 0.0, AUDIO_MAX_MS, 0.0)
+                     if "audio_pos" in data else None)
+        audio_dur = (_clamp_float(data["audio_dur"], 0.0, AUDIO_MAX_MS, 0.0)
+                     if "audio_dur" in data else None)
         read = bool(data.get("read"))
         listen_sec = _clamp_int(data.get("listen_sec"), 0, 300, 0)
-        result = self.progress.update(cid, lesson, pct, pos, dur, read, listen_sec)
+        result = self.progress.update(cid, lesson, pct, pos, dur, read, listen_sec,
+                                      audio_pos, audio_dur)
         h._send_json({"ok": True, **result})
 
     # ------------------------------------------------------------ 统计 / 搜索
@@ -976,16 +1003,13 @@ class MobileAPI:
             raise APIError(400, "bad_request", "query too long")
         needle = query.lower()
         courses_out, lessons_out = [], []
+        snap = self.progress.snapshot()["courses"]
         for course in self.index.courses():
             if needle in course["name"].lower() \
                     or needle in course["author"].lower() \
                     or needle in course["identity"].lower():
-                catalog = self.index.catalog(course)
-                courses_out.append({
-                    "id": course["id"], "name": course["name"],
-                    "author": course["author"], "cover_url": course["cover_url"],
-                    "total": catalog["total"] or course["manifest_lessons"],
-                })
+                # 与 /api/courses 同一套字段，客户端才能显示搜索结果的真实进度
+                courses_out.append(self._course_row(course, snap))
             catalog = self.index.catalog(course)
             for item in catalog["items"]:
                 if needle in item["label"].lower():

@@ -40,7 +40,12 @@ fun Context.isDark(): Boolean {
 }
 
 object Ui {
-    const val ORANGE = 0xFFF66121.toInt()
+    /** 橙色在 values-night 里是另一个值，硬编码会让深色模式下的强调色发暗。 */
+    fun orange(ctx: Context): Int = ctx.c(R.color.orange)
+
+    /** 橙色淡底，alpha 取 0..255。 */
+    fun orangeSoft(ctx: Context, alpha: Int): Int =
+        (orange(ctx) and 0x00FFFFFF) or (alpha shl 24)
 
     fun text(
         ctx: Context,
@@ -64,6 +69,7 @@ object Ui {
         @DrawableRes res: Int,
         color: Int,
         sizeDp: Int = 24,
+        desc: String? = null,
         onClick: (() -> Unit)? = null
     ): ImageView = ImageView(ctx).apply {
         setImageResource(res)
@@ -79,16 +85,24 @@ object Ui {
         } else {
             layoutParams = LinearLayout.LayoutParams(ctx.dp(sizeDp), ctx.dp(sizeDp))
         }
-        contentDescription = null
+        contentDescription = desc
+        // 纯装饰图标（旁边已有文字）对 TalkBack 隐藏，可点图标必须带 desc
+        if (desc == null) importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     fun ripple(ctx: Context, color: Int, radiusDp: Float = 12f, pressed: Int = 0x14000000): RippleDrawable {
+        val radius = ctx.dp(radiusDp).toFloat()
         val mask = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = ctx.dp(radiusDp).toFloat()
+            cornerRadius = radius
             setColor(Color.WHITE)
         }
-        return RippleDrawable(ColorStateList.valueOf(pressed), null, mask)
+        val content = if (color == Color.TRANSPARENT) null else GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setColor(color)
+        }
+        return RippleDrawable(ColorStateList.valueOf(pressed), content, mask)
     }
 
     fun roundBg(ctx: Context, color: Int, radiusDp: Float, stroke: Int? = null, strokeDp: Float = 1f): GradientDrawable =
@@ -113,12 +127,12 @@ object Ui {
     fun primaryButton(ctx: Context, label: String, onClick: () -> Unit): TextView =
         text(ctx, label, 15f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
-            background = ripple(ctx, ORANGE, 22f, 0x33FFFFFF)
-            background = roundBg(ctx, ORANGE, 22f)
+            background = ripple(ctx, orange(ctx), 22f, 0x33FFFFFF)
             isClickable = true
             setOnClickListener { onClick() }
+            minimumHeight = ctx.dp(44)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(44)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
 
@@ -128,8 +142,9 @@ object Ui {
             background = roundBg(ctx, Color.TRANSPARENT, 22f, ctx.c(R.color.orange), 1f)
             isClickable = true
             setOnClickListener { onClick() }
+            minimumHeight = ctx.dp(44)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(44)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
 
@@ -137,10 +152,11 @@ object Ui {
         text(ctx, label, 13f, if (selected) Color.WHITE else ctx.c(R.color.text), selected).apply {
             gravity = Gravity.CENTER
             setPadding(ctx.dp(14), 0, ctx.dp(14), 0)
-            background = if (selected) roundBg(ctx, ORANGE, 16f)
+            background = if (selected) roundBg(ctx, orange(ctx), 16f)
             else roundBg(ctx, ctx.c(R.color.surface_alt), 16f)
+            minimumHeight = ctx.dp(32)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ctx.dp(32)
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = ctx.dp(8) }
             isClickable = true
         }
@@ -160,20 +176,25 @@ object Ui {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(ctx.dp(6), 0, ctx.dp(10), 0)
+            // 标题是 sp，系统字号放大后固定 52dp 会裁字，所以只给最小高度
+            minimumHeight = ctx.dp(52)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
             if (onBack != null) {
-                addView(icon(ctx, R.drawable.ic_back, ctx.c(R.color.text), 24, onBack))
+                addView(icon(ctx, R.drawable.ic_back, ctx.c(R.color.text), 24, "返回", onBack))
             } else {
                 addView(View(ctx).apply {
                     layoutParams = LinearLayout.LayoutParams(ctx.dp(10), 1)
                 })
             }
-            addView(text(ctx, title, 22f, ctx.c(R.color.text), true, 1).apply {
+            val titleView = text(ctx, title, 22f, ctx.c(R.color.text), true, 1).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                     .apply { marginStart = ctx.dp(6) }
-            })
+            }
+            addView(titleView)
+            // 调用方改标题走 tag，不要 getChildAt(1) 硬编码位置
+            tag = titleView
         }
 
     fun toast(ctx: Context, msg: String) {
@@ -245,9 +266,12 @@ object Ui {
 class MaxWidthLayout(context: Context, private val maxDp: Int = 720) : FrameLayout(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val max = context.dp(maxDp.toFloat())
-        val width = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY)
-            minOf(MeasureSpec.getSize(widthMeasureSpec), max)
-        else MeasureSpec.getSize(widthMeasureSpec)
+        val size = MeasureSpec.getSize(widthMeasureSpec)
+        // UNSPECIFIED 时 size 可能是 0，此时只能按上限测量，否则子 View 全被压成 0 宽
+        val width = when (MeasureSpec.getMode(widthMeasureSpec)) {
+            MeasureSpec.UNSPECIFIED -> max
+            else -> if (size > 0) minOf(size, max) else max
+        }
         super.onMeasure(
             MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
             heightMeasureSpec

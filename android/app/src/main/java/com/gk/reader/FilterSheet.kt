@@ -70,7 +70,7 @@ object FilterSheet {
             isClickable = true
         }
         header.addView(reset)
-        header.addView(Ui.icon(ctx, R.drawable.ic_close, ctx.c(R.color.text_dim), 20) { dialog.dismiss() })
+        header.addView(Ui.icon(ctx, R.drawable.ic_close, ctx.c(R.color.text_dim), 20, "关闭筛选") { dialog.dismiss() })
         root.addView(header)
 
         val tabs = LinearLayout(ctx).apply {
@@ -120,12 +120,13 @@ object FilterSheet {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(ctx.dp(12), 0, ctx.dp(12), 0)
+                minimumHeight = ctx.dp(46)
                 layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(46)
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 )
                 background = Ui.roundBg(
                     ctx,
-                    if (selected) 0x14F66121 else 0x00000000,
+                    if (selected) Ui.orangeSoft(ctx, 0x14) else 0x00000000,
                     8f
                 )
                 isClickable = true
@@ -145,7 +146,7 @@ object FilterSheet {
                 val tv = tabViews[i]
                 val selected = i == tab
                 tv.setTextColor(if (selected) android.graphics.Color.WHITE else ctx.c(R.color.text))
-                tv.background = if (selected) Ui.roundBg(ctx, Ui.ORANGE, 16f)
+                tv.background = if (selected) Ui.roundBg(ctx, Ui.orange(ctx), 16f)
                 else Ui.roundBg(ctx, ctx.c(R.color.surface_alt), 16f)
                 tv.setTypeface(tv.typeface, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
             }

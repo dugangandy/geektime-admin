@@ -48,18 +48,19 @@ object PlayerController {
 
     private var tickerOn = false
     private var sleepUntil = 0L
-    private var sleepNotified = false
+    private var playJob: kotlinx.coroutines.Job? = null
+
+    /** 独立闹钟：睡眠定时不能依赖 ticker，否则所有页面退到后台后就停摆了。 */
+    private val sleepAlarm = Runnable {
+        sleepUntil = 0
+        controller?.pause()
+        notifyState()
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
-            if (!tickerOn) return
-            if (sleepUntil > 0 && System.currentTimeMillis() >= sleepUntil) {
-                sleepUntil = 0
-                sleepNotified = false
-                controller?.pause()
-            }
+            tickerOn = false
             notifyState()
-            handler.postDelayed(this, 500)
         }
     }
 
@@ -68,12 +69,17 @@ object PlayerController {
         val app = ctx.applicationContext
         appContext = app
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
-        val future = MediaController.Builder(app, token).buildAsync()
+        val future = MediaController.Builder(app, token)
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) = onDisconnected()
+            })
+            .buildAsync()
         connecting = future
         future.addListener({
             try {
                 val c = future.get()
                 controller = c
+                connecting = null
                 c.addListener(object : Player.Listener {
                     override fun onEvents(player: Player, events: Player.Events) = notifyState()
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -90,6 +96,14 @@ object PlayerController {
         }, ContextCompat.getMainExecutor(app))
     }
 
+    /** 服务被杀后必须丢掉死连接，否则 ensure() 永远短路、播放指令全部静默失效。 */
+    private fun onDisconnected() {
+        controller = null
+        connecting = null
+        pending = null
+        notifyState()
+    }
+
     // ------------------------------------------------------------ 播放
     fun play(ctx: Context, queue: List<QueueItem>, startIndex: Int) {
         if (queue.isEmpty()) return
@@ -97,11 +111,14 @@ object PlayerController {
         ensure(app)
         val start = startIndex.coerceIn(0, queue.size - 1)
         val api = (app as GkApp).api
-        scope.launch {
+        playJob?.cancel()
+        playJob = scope.launch {
+            // 同一门课所有讲次共用封面，按 URL 缓存，避免 N 份全尺寸字节进 MediaItem
+            val artCache = HashMap<String, ByteArray?>()
             val items = queue.toList().map { item ->
                 val mediaId = item.courseId + "|" + item.idx
                 coverByMedia[mediaId] = item.coverUrl
-                val art = artwork(app, item.coverUrl)
+                val art = artCache.getOrPut(item.coverUrl) { artwork(app, item.coverUrl) }
                 val meta = MediaMetadata.Builder()
                     .setTitle(item.title)
                     .setArtist(item.courseName)
@@ -114,21 +131,25 @@ object PlayerController {
                     .setMediaMetadata(meta)
                     .build()
             }
-            handler.post { startPlayback(items, start) }
+            val first = queue[start]
+            val startMs = runCatching {
+                api.progressCourse(first.courseId).lessons[first.idx]?.audioPos ?: 0L
+            }.getOrDefault(0L)
+            handler.post { startPlayback(items, start, startMs) }
         }
     }
 
-    private fun artwork(ctx: Context, coverUrl: String): ByteArray? {
+    private suspend fun artwork(ctx: Context, coverUrl: String): ByteArray? {
         if (coverUrl.isEmpty()) return null
         val file = Covers.file(ctx, coverUrl) ?: return null
         if (file.length() > 2 * 1024 * 1024) return null
         return runCatching { file.readBytes() }.getOrNull()
     }
 
-    private fun startPlayback(items: List<MediaItem>, start: Int) {
+    private fun startPlayback(items: List<MediaItem>, start: Int, startMs: Long) {
         val run = start@{
             val c = controller ?: return@start
-            c.setMediaItems(items, start, C.TIME_UNSET)
+            c.setMediaItems(items, start, if (startMs > 0) startMs else C.TIME_UNSET)
             c.setPlaybackSpeed(prefs().speed)
             c.prepare()
             c.play()
@@ -177,7 +198,8 @@ object PlayerController {
         controller?.seekToPreviousMediaItem()
     }
 
-    fun setSpeed(speed: Float) {
+    fun setSpeed(ctx: Context, speed: Float) {
+        if (appContext == null) appContext = ctx.applicationContext
         prefs().speed = speed
         controller?.setPlaybackSpeed(speed)
         notifyState()
@@ -236,14 +258,18 @@ object PlayerController {
 
     // ------------------------------------------------------------ 定时关闭
     fun setSleep(minutes: Int) {
+        handler.removeCallbacks(sleepAlarm)
         sleepUntil = if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0
-        sleepNotified = false
+        if (sleepUntil > 0) {
+            handler.postDelayed(sleepAlarm, sleepUntil - System.currentTimeMillis())
+        }
         notifyState()
     }
 
     fun clearSleep() {
+        handler.removeCallbacks(sleepAlarm)
         sleepUntil = 0
-        sleepNotified = true
+        notifyState()
     }
 
     fun sleepRemainingMs(): Long =
@@ -252,8 +278,7 @@ object PlayerController {
     // ------------------------------------------------------------ 订阅
     fun observe(listener: (PlayState) -> Unit): (PlayState) -> Unit {
         listeners.add(listener)
-        startTicker()
-        listener(state())
+        notifyState()
         return listener
     }
 
@@ -265,7 +290,7 @@ object PlayerController {
     private fun startTicker() {
         if (tickerOn) return
         tickerOn = true
-        handler.post(ticker)
+        handler.postDelayed(ticker, 500)
     }
 
     private fun stopTicker() {
@@ -274,9 +299,14 @@ object PlayerController {
     }
 
     private fun notifyState() {
-        if (listeners.isEmpty()) return
+        if (listeners.isEmpty()) {
+            stopTicker()
+            return
+        }
         val s = state()
         for (listener in listeners) listener(s)
+        // 只有播放/缓冲时进度才会变，暂停后别再 2Hz 空转唤醒主线程
+        if (s.playing || s.buffering) startTicker() else stopTicker()
     }
 
     private fun prefs(): Prefs = (appContext as GkApp).prefs

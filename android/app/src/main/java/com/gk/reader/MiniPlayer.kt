@@ -12,10 +12,10 @@ class MiniPlayer(context: Context) : LinearLayout(context) {
     private val cover = CoverView(context, 34, 34, 6f)
     private val title = Ui.text(context, "", 13f, context.c(R.color.text), true, 1)
     private val sub = Ui.text(context, "", 11f, context.c(R.color.text_dim), false, 1)
-    private val toggle = Ui.icon(context, R.drawable.ic_play, context.c(R.color.text), 22) {
+    private val toggle = Ui.icon(context, R.drawable.ic_play, context.c(R.color.text), 22, "播放") {
         PlayerController.toggle()
     }
-    private val close = Ui.icon(context, R.drawable.ic_close, context.c(R.color.text_dim), 18) {
+    private val close = Ui.icon(context, R.drawable.ic_close, context.c(R.color.text_dim), 18, "停止播放") {
         PlayerController.stopPlayback()
     }
     private var observer: ((PlayState) -> Unit)? = null
@@ -34,7 +34,8 @@ class MiniPlayer(context: Context) : LinearLayout(context) {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(context.dp(12), 0, context.dp(4), 0)
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, context.dp(56))
+            minimumHeight = context.dp(56)
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             setOnClickListener { open() }
         }
         row.addView(cover)
@@ -76,6 +77,7 @@ class MiniPlayer(context: Context) : LinearLayout(context) {
         }
         sub.setTextColor(context.c(if (state.error != null) R.color.red else R.color.text_dim))
         toggle.setImageResource(if (state.playing) R.drawable.ic_pause else R.drawable.ic_play)
+        toggle.contentDescription = if (state.playing) "暂停" else "播放"
         toggle.setColorFilter(context.c(R.color.text))
         if (state.coverUrl != lastCover) {
             lastCover = state.coverUrl

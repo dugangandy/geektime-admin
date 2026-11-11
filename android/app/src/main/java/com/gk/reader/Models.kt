@@ -60,6 +60,7 @@ data class NavRef(val idx: Int, val title: String)
 
 data class LessonDetail(
     val idx: Int,
+    val pageUrl: String,
     val total: Int,
     val kind: String,
     val title: String,
@@ -80,7 +81,9 @@ data class LessonProgress(
     val pos: Double,
     val dur: Double,
     val read: Boolean,
-    val touched: Long
+    val touched: Long,
+    val audioPos: Long = 0,
+    val audioDur: Long = 0
 )
 
 data class CourseProgress(val lessons: Map<Int, LessonProgress>, val last: LastLesson?)

@@ -23,6 +23,8 @@ class DetailActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
+        private const val STATE_EXPANDED = "state_expanded"
+        private const val STATE_SCROLL = "state_scroll"
 
         fun open(ctx: Context, courseId: String, courseName: String) {
             ctx.startActivity(
@@ -46,8 +48,14 @@ class DetailActivity : AppCompatActivity() {
     private var courseId = ""
     private var courseName = ""
     private var detail: CourseDetail? = null
-    private val expanded = HashSet<String>()
+    /** 按章节序号记展开状态：同名章节（如「结束语」）用名字做键会互相串。 */
+    private val expanded = HashSet<Int>()
     private var firstResume = true
+    private var built = false
+    private var restoreScroll = -1
+    private val rowMarks = HashMap<Int, Pair<LinearLayout, View>>()
+    private var playingIdx = -1
+    private var playObserver: ((PlayState) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,13 +66,17 @@ class DetailActivity : AppCompatActivity() {
             finish()
             return
         }
+        if (savedInstanceState != null) {
+            savedInstanceState.getIntegerArrayList(STATE_EXPANDED)?.let { expanded.addAll(it) }
+            restoreScroll = savedInstanceState.getInt(STATE_SCROLL, -1)
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(c(R.color.bg))
         }
         val bar = Ui.topBar(this, courseName.ifEmpty { "课程详情" }) { finish() }
-        topTitle = bar.getChildAt(1) as TextView
+        topTitle = bar.tag as TextView
         root.addView(bar)
         scroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -78,13 +90,22 @@ class DetailActivity : AppCompatActivity() {
         mini = MiniPlayer(this).apply { attach() }
         root.addView(mini, MiniPlayer.layoutParams(this))
         setContentView(root)
+        built = true
+        playObserver = PlayerController.observe { syncPlaying(it) }
 
         showLoading()
         load(false)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putIntegerArrayList(STATE_EXPANDED, ArrayList(expanded))
+        if (built) outState.putInt(STATE_SCROLL, scroll.scrollY)
+    }
+
     override fun onResume() {
         super.onResume()
+        if (!built) return
         mini.refresh()
         if (firstResume) {
             firstResume = false
@@ -130,19 +151,31 @@ class DetailActivity : AppCompatActivity() {
     }
 
     private fun render(data: CourseDetail) {
+        rowMarks.clear()
+        playingIdx = -1
         body.removeAllViews()
         body.addView(header(data))
         body.addView(chapterList(data))
         body.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(1, dp(24))
         })
+        syncPlaying(PlayerController.state())
+        if (restoreScroll >= 0) {
+            val target = restoreScroll
+            restoreScroll = -1
+            scroll.post { scroll.scrollTo(0, target) }
+        }
+    }
+
+    private fun syncPlaying(state: PlayState) {
+        highlightPlaying(if (state.hasItem && state.courseId == courseId) state.lessonIdx else -1)
     }
 
     private fun header(data: CourseDetail): LinearLayout {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(14))
-            background = Ui.roundBg(this@DetailActivity, 0x0FF66121, 0f)
+            background = Ui.roundBg(this@DetailActivity, Ui.orangeSoft(this@DetailActivity, 0x0F), 0f)
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -207,7 +240,9 @@ class DetailActivity : AppCompatActivity() {
             val item = continueLesson(detail ?: return@primaryButton) ?: return@primaryButton
             openReader(item.idx)
         }.apply {
-            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(10) }
+            layoutParams = LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { marginEnd = dp(10) }
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(dp(12), 0, dp(12), 0)
@@ -216,7 +251,7 @@ class DetailActivity : AppCompatActivity() {
             val first = (detail ?: return@secondaryButton).lessons.firstOrNull() ?: return@secondaryButton
             openReader(first.idx)
         }.apply {
-            layoutParams = LinearLayout.LayoutParams(dp(104), dp(44))
+            layoutParams = LinearLayout.LayoutParams(dp(104), ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         buttons.addView(continueButton)
         buttons.addView(fromStart)
@@ -245,20 +280,45 @@ class DetailActivity : AppCompatActivity() {
         })
         box.addView(head)
 
-        if (expanded.isEmpty()) {
-            data.chapters.firstOrNull()?.let { expanded.add(it.name) }
-        }
-        for (chapter in data.chapters) {
-            val open = expanded.contains(chapter.name)
+        if (expanded.isEmpty() && data.chapters.isNotEmpty()) expanded.add(0)
+        for ((index, chapter) in data.chapters.withIndex()) {
+            val open = expanded.contains(index)
+            val rowsBox = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = if (open) View.VISIBLE else View.GONE
+            }
+            var filled = false
+            fun fill() {
+                if (filled) return
+                filled = true
+                for (item in chapter.items) rowsBox.addView(lessonRow(item))
+                highlightPlaying(playingIdx, force = true)
+            }
+            val chevron = Ui.icon(
+                this,
+                if (open) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right,
+                c(R.color.text_dim), 16
+            )
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(16), dp(10), dp(16), dp(10))
                 background = Ui.roundBg(this@DetailActivity, c(R.color.surface_alt), 0f)
                 isClickable = true
+                // 只开合这一章的容器，别整页重绘（会重新拉封面、丢滚动位置）
                 setOnClickListener {
-                    if (open) expanded.remove(chapter.name) else expanded.add(chapter.name)
-                    detail?.let { render(it) }
+                    val nowOpen = !expanded.contains(index)
+                    if (nowOpen) {
+                        expanded.add(index)
+                        fill()
+                        rowsBox.visibility = View.VISIBLE
+                    } else {
+                        expanded.remove(index)
+                        rowsBox.visibility = View.GONE
+                    }
+                    chevron.setImageResource(
+                        if (nowOpen) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right
+                    )
                 }
             }
             header.addView(Ui.text(this, chapter.name, 13f, c(R.color.text), true, 1).apply {
@@ -267,35 +327,43 @@ class DetailActivity : AppCompatActivity() {
             header.addView(Ui.text(this, "${chapter.items.size} 讲", 12f, c(R.color.text_dim), false, 1).apply {
                 setPadding(0, 0, dp(6), 0)
             })
-            header.addView(Ui.icon(
-                this,
-                if (open) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right,
-                c(R.color.text_dim), 16
-            ))
+            header.addView(chevron)
             box.addView(header)
-            if (open) {
-                for (item in chapter.items) box.addView(lessonRow(item))
-            }
+            box.addView(rowsBox)
+            if (open) fill()
         }
         return box
     }
 
+    /** 播放中的讲次高亮：换讲时只改两行，不重绘目录。 */
+    private fun highlightPlaying(idx: Int, force: Boolean = false) {
+        if (!force && idx == playingIdx) return
+        rowMarks[playingIdx]?.let { (row, mark) ->
+            row.background = null
+            mark.visibility = View.GONE
+        }
+        playingIdx = idx
+        rowMarks[idx]?.let { (row, mark) ->
+            row.background = Ui.roundBg(this, Ui.orangeSoft(this, 0x0F), 0f)
+            mark.visibility = View.VISIBLE
+        }
+    }
+
     private fun lessonRow(item: LessonItem): LinearLayout {
-        val playing = PlayerController.state().let { it.courseId == courseId && it.lessonIdx == item.idx }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(11), dp(12), dp(11))
-            background = if (playing) Ui.roundBg(this@DetailActivity, 0x0FF66121, 0f) else null
             isClickable = true
             setOnClickListener { openReader(item.idx) }
         }
-        if (playing) {
-            row.addView(View(this).apply {
-                setBackgroundColor(Ui.ORANGE)
-                layoutParams = LinearLayout.LayoutParams(dp(3), dp(26)).apply { marginEnd = dp(8) }
-            })
+        val mark = View(this).apply {
+            setBackgroundColor(Ui.orange(this@DetailActivity))
+            layoutParams = LinearLayout.LayoutParams(dp(3), dp(26)).apply { marginEnd = dp(8) }
+            visibility = View.GONE
         }
+        row.addView(mark)
+        rowMarks[item.idx] = row to mark
         row.addView(Ui.text(this, "%02d".format(item.idx), 12f, c(R.color.text_dim), false, 1).apply {
             layoutParams = LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
@@ -308,12 +376,12 @@ class DetailActivity : AppCompatActivity() {
             })
         }
         if (item.hasAudio) {
-            row.addView(Ui.icon(this, R.drawable.ic_headphone, c(R.color.text_dim), 15) {
+            row.addView(Ui.icon(this, R.drawable.ic_headphone, c(R.color.text_dim), 15, "播放 ${item.label}") {
                 playAudio(item)
             })
         }
         if (item.hasPdf && item.pdfUrl.isNotEmpty()) {
-            row.addView(Ui.icon(this, R.drawable.ic_pdf, c(R.color.text_dim), 15) {
+            row.addView(Ui.icon(this, R.drawable.ic_pdf, c(R.color.text_dim), 15, "查看 ${item.label} 的 PDF 原稿") {
                 Pdf.open(this@DetailActivity, item.pdfUrl)
             })
         }
@@ -356,7 +424,9 @@ class DetailActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        mini.detach()
+        playObserver?.let { PlayerController.unobserve(it) }
+        playObserver = null
+        if (built) mini.detach()
         super.onDestroy()
     }
 }

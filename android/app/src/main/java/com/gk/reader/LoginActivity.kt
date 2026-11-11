@@ -29,16 +29,59 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var loginButton: TextView
     private lateinit var progress: ProgressBar
     private lateinit var rememberBox: CheckBox
+    private lateinit var visibleToggle: TextView
     private var busy = false
     private var passwordVisible = false
+    private var lockUntil = 0L
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private val lockTick = object : Runnable {
+        override fun run() {
+            val left = lockLeftSec()
+            if (left <= 0) {
+                pingLabel.setTextColor(c(R.color.text_dim))
+                pingLabel.text = "可以重试了"
+                updateEnabled()
+                return
+            }
+            pingLabel.text = "尝试次数过多，请 $left 秒后再试"
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = (application as GkApp).api
         prefs = (application as GkApp).prefs
         setContentView(buildUi())
+        if (savedInstanceState != null) {
+            passwordVisible = savedInstanceState.getBoolean(STATE_VISIBLE, false)
+            pingLabel.text = savedInstanceState.getString(STATE_HINT).orEmpty()
+            lockUntil = savedInstanceState.getLong(STATE_LOCK, 0L)
+            applyPasswordVisibility()
+            if (lockLeftSec() > 0) {
+                pingLabel.setTextColor(c(R.color.red))
+                updateEnabled()
+                handler.post(lockTick)
+            }
+        }
         if (api.hasSession()) silentSessionCheck()
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_VISIBLE, passwordVisible)
+        outState.putString(STATE_HINT, pingLabel.text.toString())
+        outState.putLong(STATE_LOCK, lockUntil)
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(lockTick)
+        super.onDestroy()
+    }
+
+    private fun lockLeftSec(): Int =
+        ((lockUntil - android.os.SystemClock.elapsedRealtime()) / 1000).toInt().coerceAtLeast(0)
 
     private fun buildUi(): ViewGroup {
         val ctx = this
@@ -86,6 +129,7 @@ class LoginActivity : AppCompatActivity() {
 
         content.addView(fieldLabel("服务器地址"))
         address = editText(prefs.serverUrl, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        address.id = R.id.login_address
         content.addView(address)
 
         val testRow = LinearLayout(this).apply {
@@ -110,11 +154,13 @@ class LoginActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             background = Ui.roundBg(ctx, ctx.c(R.color.surface_alt), 10f)
             setPadding(ctx.dp(12), 0, ctx.dp(6), 0)
+            minimumHeight = ctx.dp(48)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(48)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
         password = EditText(this).apply {
+            id = R.id.login_password
             hint = "输入口令"
             setTextColor(ctx.c(R.color.text))
             setHintTextColor(ctx.c(R.color.text_dim))
@@ -132,22 +178,19 @@ class LoginActivity : AppCompatActivity() {
             }
         }
         pwRow.addView(password)
-        pwRow.addView(Ui.text(this, "显示", 12f, ctx.c(R.color.orange), true).apply {
+        visibleToggle = Ui.text(this, "显示", 12f, ctx.c(R.color.orange), true).apply {
             setPadding(ctx.dp(10), ctx.dp(8), ctx.dp(8), ctx.dp(8))
             isClickable = true
             setOnClickListener {
                 passwordVisible = !passwordVisible
-                password.inputType = if (passwordVisible)
-                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                else
-                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                text = if (passwordVisible) "隐藏" else "显示"
-                password.setSelection(password.text.length)
+                applyPasswordVisibility()
             }
-        })
+        }
+        pwRow.addView(visibleToggle)
         content.addView(pwRow)
 
         rememberBox = CheckBox(this).apply {
+            id = R.id.login_remember
             text = "记住登录（7 天免登录）"
             isChecked = prefs.remember
             setTextColor(ctx.c(R.color.text_dim))
@@ -158,8 +201,9 @@ class LoginActivity : AppCompatActivity() {
         content.addView(rememberBox)
 
         loginButton = Ui.primaryButton(this, "进 入 课 程 库") { doLogin() }.apply {
+            minimumHeight = ctx.dp(46)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(46)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = ctx.dp(10) }
         }
         content.addView(loginButton)
@@ -204,8 +248,9 @@ class LoginActivity : AppCompatActivity() {
         setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
         background = Ui.roundBg(this@LoginActivity, c(R.color.surface_alt), 10f)
         setPadding(dp(12), 0, dp(12), 0)
+        minimumHeight = dp(48)
         layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         )
         isSingleLine = true
     }
@@ -217,11 +262,25 @@ class LoginActivity : AppCompatActivity() {
             setOnClickListener { address.setText(value) }
         }
 
+    private fun applyPasswordVisibility() {
+        password.inputType = if (passwordVisible)
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        else
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        visibleToggle.text = if (passwordVisible) "隐藏" else "显示"
+        password.setSelection(password.text.length)
+    }
+
     private fun setBusy(value: Boolean) {
         busy = value
-        loginButton.alpha = if (value) 0.55f else 1f
-        loginButton.isClickable = !value
-        progress.visibility = if (value) ProgressBar.VISIBLE else ProgressBar.GONE
+        updateEnabled()
+    }
+
+    private fun updateEnabled() {
+        val blocked = busy || lockLeftSec() > 0
+        loginButton.alpha = if (blocked) 0.55f else 1f
+        loginButton.isClickable = !blocked
+        progress.visibility = if (busy) ProgressBar.VISIBLE else ProgressBar.GONE
     }
 
     private fun testConnection() {
@@ -244,7 +303,7 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun doLogin() {
-        if (busy) return
+        if (busy || lockLeftSec() > 0) return
         val server = Api.normalize(address.text.toString())
         val pwd = password.text.toString()
         if (pwd.isEmpty()) {
@@ -252,11 +311,12 @@ class LoginActivity : AppCompatActivity() {
             password.requestFocus()
             return
         }
-        prefs.remember = rememberBox.isChecked
         setBusy(true)
         lifecycleScope.launch {
             try {
                 api.login(server, pwd, rememberBox.isChecked)
+                // 只有登录成功才落盘，否则失败的尝试会把上次的选择改掉
+                prefs.remember = rememberBox.isChecked
                 setBusy(false)
                 startActivity(Intent(this@LoginActivity, MainActivity::class.java))
                 finish()
@@ -264,7 +324,7 @@ class LoginActivity : AppCompatActivity() {
                 setBusy(false)
                 when (e.code) {
                     "bad_password" -> pingLabel.text = "密码不正确，请重试"
-                    "locked" -> pingLabel.text = "尝试次数过多，请 ${e.retryAfter} 秒后再试"
+                    "locked" -> startLockout(e.retryAfter)
                     "forbidden" -> pingLabel.text = "服务器拒绝了这次登录，请升级 PC 端 serve.py"
                     else -> pingLabel.text = e.message
                 }
@@ -275,6 +335,14 @@ class LoginActivity : AppCompatActivity() {
                 pingLabel.text = "无法连接：${e.message ?: "网络错误"}"
             }
         }
+    }
+
+    /** 锁定时给出倒计时并禁用按钮，否则用户只能对着「请 60 秒后再试」反复点。 */
+    private fun startLockout(retryAfterSec: Int) {
+        lockUntil = android.os.SystemClock.elapsedRealtime() +
+            retryAfterSec.coerceAtLeast(1) * 1000L
+        handler.removeCallbacks(lockTick)
+        handler.post(lockTick)
     }
 
     private fun silentSessionCheck() {
@@ -289,5 +357,11 @@ class LoginActivity : AppCompatActivity() {
                 // 网络不通时仍允许手动登录重试
             }
         }
+    }
+
+    companion object {
+        private const val STATE_VISIBLE = "state_visible"
+        private const val STATE_HINT = "state_hint"
+        private const val STATE_LOCK = "state_lock"
     }
 }

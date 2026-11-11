@@ -4,8 +4,10 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -49,6 +51,16 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         player = exo
+        // 定时上报会漏掉每讲最后一段；播完/暂停时立刻结清，听完才能真正标记已学完
+        exo.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) report(force = true)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) report(force = true)
+            }
+        })
 
         val open = PendingIntent.getActivity(
             this, 0,
@@ -65,43 +77,46 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val p = player
-        if (p == null || !p.playWhenReady) stopSelf()
+        // 交给 Media3：它用 isPlaybackOngoing() 判断，比 playWhenReady 准确
+        // （缓冲/IDLE 时 playWhenReady 仍为 true，会留下带通知的空前台服务）
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(reporter)
-        session?.run {
-            player.release()
-            release()
-        }
+        report(force = true)
+        // 先释放 session 再释放 player；session?.run{player} 会解析到 session.getPlayer()
+        session?.release()
+        player?.release()
         session = null
         player = null
         super.onDestroy()
     }
 
-    private fun report() {
+    private fun report(force: Boolean = false) {
         val p = player ?: return
-        if (!p.isPlaying) {
+        val playing = p.isPlaying
+        if (!playing && !force) {
             lastTickMs = 0
             return
         }
-        val id = p.currentMediaItem?.mediaId ?: return
-        val parts = id.split('|')
+        val now = SystemClock.elapsedRealtime()
+        val listen = if (lastTickMs > 0) ((now - lastTickMs) / 1000).toInt().coerceIn(0, 15) else 0
+        lastTickMs = if (playing) now else 0
+        reportItem(p.currentMediaItem?.mediaId, p.currentPosition, p.duration, listen)
+    }
+
+    private fun reportItem(mediaId: String?, pos: Long, dur: Long, listen: Int) {
+        val parts = mediaId?.split('|') ?: return
         if (parts.size != 2) return
-        val courseId = parts[0]
         val idx = parts[1].toIntOrNull() ?: return
-        val dur = p.duration
         if (dur <= 0) return
-        val pos = p.currentPosition
-        val pct = pos * 100.0 / dur
-        val now = System.currentTimeMillis()
-        val listen = if (lastTickMs > 0) ((now - lastTickMs) / 1000).toInt() else 0
-        lastTickMs = now
+        val pct = (pos * 100.0 / dur).coerceIn(0.0, 100.0)
         val api = (application as GkApp).api
         scope.launch {
             runCatching {
-                api.postProgress(courseId, idx, pct, pos.toDouble(), dur.toDouble(), false, listen)
+                api.postAudioProgress(parts[0], idx, pct, pos, dur, listen,
+                    pct >= Api.READ_THRESHOLD)
             }
         }
     }

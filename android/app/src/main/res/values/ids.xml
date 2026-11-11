@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 纯代码构建的 View 默认没有 id，框架就不会保存它们的输入内容；旋转后地址/密码会被清空 -->
+    <item name="login_address" type="id" />
+    <item name="login_password" type="id" />
+    <item name="login_remember" type="id" />
+</resources>

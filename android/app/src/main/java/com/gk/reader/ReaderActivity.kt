@@ -24,7 +24,9 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URLDecoder
@@ -37,6 +39,8 @@ class ReaderActivity : AppCompatActivity() {
         private const val EXTRA_IDX = "idx"
         private const val EXTRA_COURSE_NAME = "courseName"
         private const val EXTRA_TITLE = "title"
+        private const val STATE_IDX = "state_idx"
+        private const val STATE_POS = "state_pos"
 
         fun open(ctx: Context, courseId: String, idx: Int, courseName: String = "", title: String = "") {
             ctx.startActivity(
@@ -51,7 +55,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private val api: Api get() = (application as GkApp).api
     private lateinit var prefs: Prefs
-    private lateinit var web: WebView
+    private lateinit var web: ReaderWebView
     private lateinit var titleText: TextView
     private lateinit var metaText: TextView
     private lateinit var progressLine: ProgressLine
@@ -70,11 +74,20 @@ class ReaderActivity : AppCompatActivity() {
     private var progressMap: Map<Int, LessonProgress> = emptyMap()
     private var savedPos = 0.0
     private var restored = false
+    private var pageReady = false
+    private var built = false
+    /** >=0 时优先于服务端进度：旋转重建或「刷新正文」要求留在原位。 */
+    private var restorePos = -1
     private var lastReport = 0L
     private var completedShown = false
     private var draggingSeek = false
     private var observer: ((PlayState) -> Unit)? = null
     private var detailCache: CourseDetail? = null
+    /** 每次提交新文档 +1；onPageFinished 记下就绪的那一代，防止旧页滚动报到新讲次上。 */
+    private var docGen = 0
+    private var readyGen = -1
+    /** 最后一次上报必须活过 onDestroy，lifecycleScope 会在 finishing 时把它取消掉。 */
+    private val reportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,33 +99,44 @@ class ReaderActivity : AppCompatActivity() {
             finish()
             return
         }
+        if (savedInstanceState != null) {
+            idx = savedInstanceState.getInt(STATE_IDX, idx)
+            restorePos = savedInstanceState.getInt(STATE_POS, -1)
+        }
         buildUi()
         loadProgress()
         loadLesson(false)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_IDX, idx)
+        if (built) outState.putInt(STATE_POS, web.scrollOffset())
+    }
+
     override fun onResume() {
         super.onResume()
+        if (!built) return
         web.onResume()
         audioBar.post { renderAudio(PlayerController.state()) }
     }
 
     override fun onPause() {
-        report(true)
-        web.onPause()
+        if (built) web.onPause()
         super.onPause()
+    }
+
+    override fun onStop() {
+        // 只在 onStop 强制上报一次：返回键 + onPause 会重复 POST，且最后位置最关键
+        if (built) report(true)
+        super.onStop()
     }
 
     override fun onDestroy() {
         observer?.let { PlayerController.unobserve(it) }
         observer = null
-        web.destroy()
+        if (built) web.destroy()
         super.onDestroy()
-    }
-
-    override fun onBackPressed() {
-        report(true)
-        super.onBackPressed()
     }
 
     // ------------------------------------------------------------ 布局
@@ -127,11 +151,12 @@ class ReaderActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(6), 0)
+            minimumHeight = dp(52)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-        bar.addView(Ui.icon(this, R.drawable.ic_back, c(R.color.text), 24) {
+        bar.addView(Ui.icon(this, R.drawable.ic_back, c(R.color.text), 24, "返回") {
             report(true)
             finish()
         })
@@ -143,10 +168,10 @@ class ReaderActivity : AppCompatActivity() {
         bar.addView(Ui.text(this, "Aa", 17f, c(R.color.text), true, 1).apply {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             isClickable = true
+            contentDescription = "字号与排版"
             setOnClickListener { showTextDialog() }
         })
-        bar.addView(Ui.icon(this, R.drawable.ic_more, c(R.color.text), 22) { showMore() }
-            .apply { contentDescription = "更多" })
+        bar.addView(Ui.icon(this, R.drawable.ic_more, c(R.color.text), 22, "更多") { showMore() })
         root.addView(bar)
 
         progressLine = ProgressLine(this, 2f).apply {
@@ -165,7 +190,7 @@ class ReaderActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
-        web = WebView(this).apply {
+        web = ReaderWebView(this).apply {
             setBackgroundColor(c(R.color.bg))
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -189,10 +214,9 @@ class ReaderActivity : AppCompatActivity() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     loading.visibility = View.GONE
-                    if (!restored) {
-                        restored = true
-                        if (savedPos > 0) view?.scrollTo(0, savedPos.toInt())
-                    }
+                    readyGen = docGen
+                    pageReady = true
+                    tryRestore()
                     updateProgress()
                 }
             }
@@ -212,6 +236,9 @@ class ReaderActivity : AppCompatActivity() {
         setContentView(root)
 
         observer = PlayerController.observe { state -> renderAudio(state) }
+        // 提前装好 cookie：setCookie 是异步的，紧贴 loadData 会让首批图片请求裸奔 401
+        injectCookies()
+        built = true
     }
 
     private fun buildAudioBar(): LinearLayout {
@@ -232,7 +259,7 @@ class ReaderActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(8), dp(14), 0)
         }
-        audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 26) { toggleAudio() }
+        audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 26, "播放讲述") { toggleAudio() }
         row.addView(audioToggle)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -279,22 +306,39 @@ class ReaderActivity : AppCompatActivity() {
                 val progress = api.progressCourse(courseId)
                 withContext(Dispatchers.Main) {
                     progressMap = progress.lessons
-                    savedPos = progress.lessons[idx]?.pos ?: 0.0
+                    // 进度可能晚于正文到达，补齐后再尝试恢复，避免savedPos 恒为 0
+                    if (!restored && restorePos < 0) {
+                        savedPos = progress.lessons[idx]?.pos ?: 0.0
+                        tryRestore()
+                    }
                 }
             } catch (_: Exception) {
             }
         }
     }
 
+    /** 正文就绪且拿到有效位置后才落位；两者任一未到都等下一次触发。 */
+    private fun tryRestore() {
+        if (!pageReady || restored || savedPos <= 0) return
+        restored = true
+        web.scrollTo(0, savedPos.toInt())
+    }
+
     private fun loadLesson(switchIdx: Boolean) {
         val target = idx
         loading.visibility = View.VISIBLE
         restored = false
+        pageReady = false
         completedShown = false
-        savedPos = progressMap[target]?.pos ?: 0.0
+        savedPos = if (restorePos >= 0) restorePos.toDouble()
+        else progressMap[target]?.pos ?: 0.0
+        restorePos = -1
         lifecycleScope.launch {
             try {
                 val data = api.lesson(courseId, target)
+                // 拼串可达数 MB，必须在 IO 线程做，否则每次加载/改字号都卡主线程
+                val html = buildHtml(data)
+                val base = if (data.pageUrl.isNotEmpty()) api.absolute(data.pageUrl) else api.baseUrl
                 withContext(Dispatchers.Main) {
                     if (target != idx) return@withContext
                     lesson = data
@@ -306,8 +350,8 @@ class ReaderActivity : AppCompatActivity() {
                     audioSub.text = data.title
                     audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"
                     setAudioIcon(false)
-                    injectCookies()
-                    web.loadDataWithBaseURL(api.baseUrl, buildHtml(data), "text/html", "utf-8", null)
+                    docGen++
+                    web.loadDataWithBaseURL(base, html, "text/html", "utf-8", base)
                 }
             } catch (e: AuthExpired) {
                 startActivity(
@@ -348,6 +392,7 @@ class ReaderActivity : AppCompatActivity() {
         val soft = if (dark) "#1C1C1E" else "#F7F7F9"
         val code = if (dark) "#1E1E1E" else "#F6F7F9"
         val override = """
+            html{scroll-behavior:auto;}
             body.article-page{background:$bg;color:$fg;font-size:${fs}px;line-height:$lh;padding:0 16px 32px;}
             .gk-content{max-width:100%;padding-left:0;padding-right:0;margin:0;}
             .kind-simple .gk-content{color:$fg;font-size:${fs}px;line-height:$lh;}
@@ -414,40 +459,56 @@ $override</style>
             return true
         }
         val uri = Uri.parse(url)
-        if (uri.scheme == "http" || uri.scheme == "https") {
-            val server = Uri.parse(api.baseUrl)
-            val sameHost = uri.host == server.host && uri.port == server.port
-            val page = Regex("/pages/(\\d{1,4})\\.html").find(uri.path.orEmpty())
-            if (sameHost && page != null) {
+        val scheme = uri.scheme?.lowercase(Locale.US)
+        if (scheme != "http" && scheme != "https") {
+            // mailto:/tel:/intent: 一律吞掉就是死链，交给系统处理
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            return true
+        }
+        val server = Uri.parse(api.baseUrl)
+        val sameHost = uri.host == server.host && uri.port == server.port
+        val path = uri.path.orEmpty()
+        val page = Regex("/pages/(\\d{1,4})\\.html").find(path)
+        if (sameHost && page != null) {
+            val currentDir = Uri.parse(api.absolute(lesson?.pageUrl.orEmpty()))
+                .path.orEmpty().substringBeforeLast('/')
+            // 只有同一课程目录下的讲次才能复用当前 courseId
+            if (currentDir.isNotEmpty() && currentDir == path.substringBeforeLast('/')) {
                 report(true)
                 idx = page.groupValues[1].toInt()
                 loading.visibility = View.VISIBLE
                 loadLesson(true)
-                return true
+            } else {
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
             }
-            if (sameHost) {
-                // 站内其它页面（目录/PDF 等）交给浏览器会丢登录态，直接忽略
-                return true
-            }
-            runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            return true
         }
+        if (sameHost) {
+            val current = Uri.parse(web.url.orEmpty())
+            // 同文档锚点交回 WebView 自己滚动，否则目录跳转全部失效
+            if (current.path == path && uri.fragment != null) return false
+            // 站内其它页面（目录/PDF 等）交给浏览器会丢登录态，直接忽略
+            return true
+        }
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
         return true
     }
 
     // ------------------------------------------------------------ 进度
-    private fun maxScroll(): Int {
-        val scale = web.scale
-        val content = (web.contentHeight * scale).toInt()
-        return (content - web.height).coerceAtLeast(0)
-    }
+    /* 用 WebView 的滚动三件套：range/extent/offset 单位自洽，
+       不像 contentHeight(CSS px) 与 height/scrollY(设备 px) 混算，也不依赖已废弃的 scale。 */
+    private fun maxScroll(): Int =
+        (web.scrollRange() - web.scrollExtent()).coerceAtLeast(0)
 
     private fun currentPct(): Double {
         val max = maxScroll()
-        if (max <= dp(8)) return 100.0
-        return (web.scrollY * 100.0 / max).coerceIn(0.0, 100.0)
+        // 内容不足一屏时无法从滚动推断读完，交给「标记已学」显式处理，避免零阅读即判已学完
+        if (max <= dp(8)) return 0.0
+        return (web.scrollOffset() * 100.0 / max).coerceIn(0.0, 100.0)
     }
 
     private fun updateProgress() {
+        if (readyGen != docGen) return
         val pct = currentPct().toFloat()
         progressLine.pct = pct
         if (pct >= 88f && !completedShown && lesson != null) {
@@ -459,14 +520,16 @@ $override</style>
 
     private fun report(force: Boolean, markRead: Boolean = false) {
         val data = lesson ?: return
+        // 新文档尚未提交完成时，滚动位置还属于上一讲，不能报到 data.idx 上
+        if (!markRead && readyGen != docGen) return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - lastReport < 3000) return
         lastReport = now
         val max = maxScroll()
-        val pos = web.scrollY.toDouble()
+        val pos = web.scrollOffset().toDouble()
         val pct = currentPct()
         val read = markRead || pct >= 88.0
-        lifecycleScope.launch {
+        reportScope.launch {
             runCatching {
                 api.postProgress(courseId, data.idx, pct, pos, max.toDouble(), read, 0)
             }
@@ -521,6 +584,7 @@ $override</style>
 
     private fun setAudioIcon(playing: Boolean) {
         audioToggle.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        audioToggle.contentDescription = if (playing) "暂停讲述" else "播放讲述"
         audioToggle.setColorFilter(c(R.color.text))
     }
 
@@ -589,7 +653,7 @@ $override</style>
                     for (j in 0 until 3) {
                         val on = j == i
                         spacingChips[j].setTextColor(if (on) Color.WHITE else c(R.color.text))
-                        spacingChips[j].background = if (on) Ui.roundBg(this@ReaderActivity, Ui.ORANGE, 16f)
+                        spacingChips[j].background = if (on) Ui.roundBg(this@ReaderActivity, Ui.orange(this@ReaderActivity), 16f)
                         else Ui.roundBg(this@ReaderActivity, c(R.color.surface_alt), 16f)
                     }
                 }
@@ -609,11 +673,19 @@ $override</style>
                 prefs.fontSp = pendingFont
                 prefs.lineSpacing = pendingSpacing
                 if (fontChanged || spacingChanged) {
-                    val keep = web.scrollY
-                    lesson?.let { data ->
-                        restored = false
-                        savedPos = keep.toDouble()
-                        web.loadDataWithBaseURL(api.baseUrl, buildHtml(data), "text/html", "utf-8", null)
+                    val keep = web.scrollOffset()
+                    val data = lesson ?: return@setPositiveButton
+                    lifecycleScope.launch {
+                        val html = buildHtml(data)
+                        val base = if (data.pageUrl.isNotEmpty()) api.absolute(data.pageUrl)
+                        else api.baseUrl
+                        withContext(Dispatchers.Main) {
+                            restored = false
+                            pageReady = false
+                            savedPos = keep.toDouble()
+                            docGen++
+                            web.loadDataWithBaseURL(base, html, "text/html", "utf-8", base)
+                        }
                     }
                 }
             }
@@ -636,9 +708,7 @@ $override</style>
         }
         labels.add("刷新正文")
         actions.add {
-            val keep = web.scrollY
-            savedPos = keep.toDouble()
-            restored = false
+            restorePos = web.scrollOffset()
             loadLesson(true)
         }
         AlertDialog.Builder(this)
@@ -648,4 +718,11 @@ $override</style>
             }
             .show()
     }
+}
+
+/** View 的滚动三件套是 protected，但只有它们单位自洽，能算出正确的阅读百分比。 */
+class ReaderWebView(context: Context) : WebView(context) {
+    fun scrollRange(): Int = computeVerticalScrollRange()
+    fun scrollExtent(): Int = computeVerticalScrollExtent()
+    fun scrollOffset(): Int = computeVerticalScrollOffset()
 }

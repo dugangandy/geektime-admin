@@ -410,6 +410,43 @@ class MobileApiCase(unittest.TestCase):
         self.assertEqual(saved["v"], 1)
         self.assertEqual(saved["daily"][next(iter(saved["daily"]))]["seconds"], 300)
 
+    def test_audio_and_reading_positions_are_independent(self):
+        """pos/dur 是阅读像素，audio_pos/audio_dur 是毫秒，两者不得互相覆盖。"""
+        self.login()
+        cid = self.course_id()
+        status, _, _ = self.api("POST", "/api/progress", {
+            "course": cid, "lesson": 0, "pct": 30, "pos": 420, "dur": 3000})
+        self.assertEqual(status, 200)
+
+        # 音频上报不带 pos/dur，阅读位置必须原样保留
+        status, _, _ = self.api("POST", "/api/progress", {
+            "course": cid, "lesson": 0, "pct": 10,
+            "audio_pos": 1800000, "audio_dur": 2400000, "listen_sec": 15})
+        self.assertEqual(status, 200)
+        status, payload, _ = self.api("GET", "/api/progress/" + cid)
+        rec = payload["lessons"]["0"]
+        self.assertEqual(rec["pos"], 420)
+        self.assertEqual(rec["dur"], 3000)
+        self.assertEqual(rec["audio_pos"], 1800000)
+        self.assertEqual(rec["audio_dur"], 2400000)
+
+        # 反向：阅读上报不带 audio_*，音频位置同样保留
+        status, _, _ = self.api("POST", "/api/progress", {
+            "course": cid, "lesson": 0, "pct": 55, "pos": 900, "dur": 3000})
+        self.assertEqual(status, 200)
+        status, payload, _ = self.api("GET", "/api/progress/" + cid)
+        rec = payload["lessons"]["0"]
+        self.assertEqual(rec["pos"], 900)
+        self.assertEqual(rec["audio_pos"], 1800000)
+        self.assertEqual(rec["audio_dur"], 2400000)
+
+        # 超过 24h 的毫秒值被 clamp，而不是沿用像素上限
+        status, _, _ = self.api("POST", "/api/progress", {
+            "course": cid, "lesson": 0, "audio_pos": 10 ** 12})
+        self.assertEqual(status, 200)
+        status, payload, _ = self.api("GET", "/api/progress/" + cid)
+        self.assertEqual(payload["lessons"]["0"]["audio_pos"], 86400 * 1000)
+
     def test_progress_rejects_bad_input(self):
         self.login()
         cid = self.course_id()
@@ -441,6 +478,22 @@ class MobileApiCase(unittest.TestCase):
         self.assertEqual(payload, {"courses": [], "lessons": []})
         status, payload, _ = self.api("GET", "/api/search?q=" + "a" * 65)
         self.assertEqual(status, 400)
+
+    def test_search_courses_carry_progress(self):
+        self.login()
+        cid = self.course_id()
+        status, _, _ = self.api("POST", "/api/progress", {
+            "course": cid, "lesson": 0, "pct": 100, "read": True})
+        self.assertEqual(status, 200)
+        status, payload, _ = self.api("GET", "/api/search?q=course")
+        self.assertEqual(status, 200)
+        hit = payload["courses"][0]
+        # 搜索结果必须和 /api/courses 同字段，否则客户端把学过的课显示成「未开始」
+        status, listing, _ = self.api("GET", "/api/courses")
+        row = next(c for c in listing["courses"] if c["id"] == cid)
+        self.assertEqual(hit, row)
+        self.assertTrue(hit["started"])
+        self.assertEqual(hit["read"], 1)
 
     # ---------------------------------------------------------------- 静态 Range
     def test_range_streaming(self):

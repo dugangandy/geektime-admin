@@ -24,7 +24,7 @@ class ApiException(
 
 class AuthExpired : Exception("登录已过期，请重新登录")
 
-/** 只存当前这一台服务器的 Cookie；换服务器时清空，避免串会话。 */
+/** 按 host|port 分桶存 Cookie；只有登录成功后才淘汰其它服务器，避免串会话。 */
 class CookieStore(context: Context) : CookieJar {
     private val sp = context.getSharedPreferences("gk_cookies", Context.MODE_PRIVATE)
 
@@ -42,22 +42,38 @@ class CookieStore(context: Context) : CookieJar {
         val prefix = url.host + "|" + url.port + "|"
         val now = System.currentTimeMillis()
         val out = ArrayList<Cookie>()
+        val expired = ArrayList<String>()
         for ((k, v) in sp.all) {
             if (!k.startsWith(prefix) || v !is String) continue
-            val cookie = Cookie.parse(url, v) ?: continue
-            if (cookie.expiresAt > now) out.add(cookie) else sp.edit().remove(k).apply()
+            // Cookie.parse 声明 @Throws，一条脏记录不能让整个进程的所有请求都挂掉
+            val cookie = runCatching { Cookie.parse(url, v) }.getOrNull() ?: continue
+            if (cookie.expiresAt > now) out.add(cookie) else expired.add(k)
+        }
+        if (expired.isNotEmpty()) {
+            val editor = sp.edit()
+            for (k in expired) editor.remove(k)
+            editor.apply()
         }
         return out
     }
 
-    fun hasAny(): Boolean = sp.all.isNotEmpty()
+    fun hasFor(url: HttpUrl): Boolean = loadForRequest(url).isNotEmpty()
+
+    /** 登录成功后只保留当前这台服务器的 Cookie；失败时不动，避免连带退掉可用的旧登录。 */
+    fun retainOnly(url: HttpUrl?) {
+        if (url == null) return
+        val prefix = url.host + "|" + url.port + "|"
+        val editor = sp.edit()
+        for (k in sp.all.keys) if (!k.startsWith(prefix)) editor.remove(k)
+        editor.apply()
+    }
 
     fun clear() = sp.edit().clear().apply()
 
     private fun keyOf(url: HttpUrl, name: String) = url.host + "|" + url.port + "|" + name
 }
 
-class Api(val context: Context, val prefs: Prefs) {
+class Api(context: Context, val prefs: Prefs) {
     val cookieStore = CookieStore(context)
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(cookieStore)
@@ -74,7 +90,10 @@ class Api(val context: Context, val prefs: Prefs) {
         return baseUrl + if (path.startsWith("/")) path else "/$path"
     }
 
-    fun hasSession() = cookieStore.hasAny()
+    fun hasSession(): Boolean {
+        val url = baseUrl.toHttpUrlOrNull() ?: return false
+        return cookieStore.hasFor(url)
+    }
 
     /** 给 WebView 补登录态：同源图片/静态资源也要带 gk_sess。 */
     fun cookieHeader(url: String = baseUrl): String {
@@ -90,20 +109,26 @@ class Api(val context: Context, val prefs: Prefs) {
         base: String? = null,
         authAsError: Boolean = false
     ): JSONObject {
-        val url = (base ?: baseUrl) + if (path.startsWith("/")) path else "/$path"
+        val origin = base ?: baseUrl
+        if (origin.isEmpty()) throw ApiException(0, "no_server", "请填写服务器地址")
+        val url = origin + if (path.startsWith("/")) path else "/$path"
         val builder = Request.Builder().url(url)
             .header("X-GK-Client", "android")
             .header("X-GK-Device", deviceId)
         val media = "application/json; charset=utf-8".toMediaType()
+        // 无 body 时必须发零字节：服务端 logout 不读请求体，残留字节会污染复用的 keep-alive 连接
+        val payload = if (body == null) ByteArray(0).toRequestBody(null)
+        else body.toString().toRequestBody(media)
         when (method) {
             "GET" -> builder.get()
-            "POST" -> builder.post((body ?: JSONObject()).toString().toRequestBody(media))
-            else -> builder.method(method, (body ?: JSONObject()).toString().toRequestBody(media))
+            "POST" -> builder.post(payload)
+            else -> builder.method(method, payload)
         }
         client.newCall(builder.build()).execute().use { res ->
             val text = res.body?.string().orEmpty()
             if (res.code == 401 && !authAsError) {
                 cookieStore.clear()
+                clearWebCookies()
                 throw AuthExpired()
             }
             if (!res.isSuccessful) {
@@ -127,12 +152,6 @@ class Api(val context: Context, val prefs: Prefs) {
         }
     }
 
-    private fun requestArray(
-        method: String,
-        path: String,
-        body: JSONObject? = null
-    ): JSONObject = request(method, path, body)
-
     // ------------------------------------------------------------ 鉴权
     suspend fun ping(server: String? = null): Ping = withContext(Dispatchers.IO) {
         val json = request("GET", "/api/ping", base = normalize(server ?: prefs.serverUrl))
@@ -148,9 +167,10 @@ class Api(val context: Context, val prefs: Prefs) {
     suspend fun login(server: String, password: String, keep: Boolean): JSONObject =
         withContext(Dispatchers.IO) {
             val base = normalize(server)
-            cookieStore.clear()
             val body = JSONObject().put("password", password).put("keep", keep)
             val json = request("POST", "/api/auth/login", body, base = base, authAsError = true)
+            // 成功之后才淘汰别的服务器：失败时保留旧登录，否则填错新地址会把可用的会话一起退掉
+            cookieStore.retainOnly(base.toHttpUrlOrNull())
             prefs.serverUrl = base
             json
         }
@@ -165,6 +185,17 @@ class Api(val context: Context, val prefs: Prefs) {
         } catch (_: Exception) {
         } finally {
             cookieStore.clear()
+            clearWebCookies()
+        }
+    }
+
+    /** gk_sess 是无状态签名令牌，服务端无法吊销；WebView 里那份必须一起清，否则登出后仍有效。 */
+    private fun clearWebCookies() {
+        runCatching {
+            val manager = android.webkit.CookieManager.getInstance()
+            manager.removeAllCookies(null)
+            manager.removeSessionCookies(null)
+            manager.flush()
         }
     }
 
@@ -235,6 +266,7 @@ class Api(val context: Context, val prefs: Prefs) {
         val json = request("GET", "/api/courses/$courseId/lessons/$idx")
         LessonDetail(
             idx = json.optInt("idx"),
+            pageUrl = json.optString("page_url"),
             total = json.optInt("total"),
             kind = json.optString("kind"),
             title = json.optString("title"),
@@ -252,17 +284,6 @@ class Api(val context: Context, val prefs: Prefs) {
     }
 
     // ------------------------------------------------------------ 进度 / 统计
-    suspend fun progressAll(): Map<String, CourseProgress> = withContext(Dispatchers.IO) {
-        val json = request("GET", "/api/progress")
-        val out = HashMap<String, CourseProgress>()
-        val root = json.optJSONObject("courses") ?: return@withContext out
-        for (id in root.keys()) {
-            val o = root.optJSONObject(id) ?: continue
-            out[id] = CourseProgress(emptyMap(), null)
-        }
-        out
-    }
-
     suspend fun progressCourse(id: String): CourseProgress = withContext(Dispatchers.IO) {
         val json = request("GET", "/api/progress/$id")
         val lessons = HashMap<Int, LessonProgress>()
@@ -275,13 +296,16 @@ class Api(val context: Context, val prefs: Prefs) {
                     pos = o.optDouble("pos", 0.0),
                     dur = o.optDouble("dur", 0.0),
                     read = o.optBoolean("read"),
-                    touched = o.optLong("touched")
+                    touched = o.optLong("touched"),
+                    audioPos = o.optLong("audio_pos"),
+                    audioDur = o.optLong("audio_dur")
                 )
             }
         }
         CourseProgress(lessons, parseLast(json.optJSONObject("last")))
     }
 
+    /** 阅读进度：pos/dur 是滚动像素，只有阅读器能写。 */
     suspend fun postProgress(
         courseId: String,
         lesson: Int,
@@ -299,6 +323,27 @@ class Api(val context: Context, val prefs: Prefs) {
             .put("dur", dur)
             .put("read", read)
             .put("listen_sec", listenSec)
+        request("POST", "/api/progress", body)
+    }
+
+    /** 音频进度：毫秒走独立字段，避免覆盖阅读器的滚动位置。 */
+    suspend fun postAudioProgress(
+        courseId: String,
+        lesson: Int,
+        pct: Double,
+        posMs: Long,
+        durMs: Long,
+        listenSec: Int,
+        read: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("course", courseId)
+            .put("lesson", lesson)
+            .put("pct", pct)
+            .put("audio_pos", posMs)
+            .put("audio_dur", durMs)
+            .put("listen_sec", listenSec)
+            .put("read", read)
         request("POST", "/api/progress", body)
     }
 
@@ -408,9 +453,13 @@ class Api(val context: Context, val prefs: Prefs) {
     }
 
     companion object {
+        /** 与服务端 mobile_api.py READ_THRESHOLD 保持一致。 */
+        const val READ_THRESHOLD = 88.0
+
         fun normalize(raw: String): String {
             var value = raw.trim()
-            if (value.isEmpty()) return Prefs.DEFAULT_SERVER
+            // 空地址不能回落到默认服务器：否则用户没填地址就把密码发去了另一台主机
+            if (value.isEmpty()) return ""
             if (!value.startsWith("http://") && !value.startsWith("https://")) {
                 value = "http://$value"
             }
