@@ -5,6 +5,20 @@ rem  (GBK on zh-CN); UTF-8 Chinese comments get mis-parsed and can even be
 rem  executed as commands. Keep every line in this file ASCII.
 cd /d "%~dp0"
 set "ROOT=%~dp0"
+
+rem  Optional: folder holding the per-course subdirectories.
+rem  Leave empty to use this script's folder. Env var GK_DATA_DIR overrides.
+rem  Example: set "DATA_DIR=D:\GeekTime Courses"
+set "DATA_DIR="
+if defined GK_DATA_DIR set "DATA_DIR=%GK_DATA_DIR%"
+if not "%DATA_DIR%"=="" if not exist "%DATA_DIR%\" (
+  echo   [ERROR] course data folder not found: %DATA_DIR%
+  pause
+  exit /b 1
+)
+set "DATAOPT="
+if not "%DATA_DIR%"=="" set DATAOPT=--data-dir "%DATA_DIR%"
+
 set "REMOTE=root@139.198.29.121"
 set "SSHOPT=-o BatchMode=yes -o ConnectTimeout=8"
 set "PING=%SystemRoot%\System32\ping.exe"
@@ -26,7 +40,7 @@ rem 1) Local server. Never start a duplicate: Windows SO_REUSEADDR lets
 rem    several python processes bind 127.0.0.1:8888 and split requests.
 netstat -ano | findstr /c:"127.0.0.1:8888" | findstr /c:"LISTENING" >nul
 if errorlevel 1 (
-  start "gk-http" /min python "%ROOT%serve.py" 8888 . --bind 127.0.0.1
+  start "gk-http" /min python "%ROOT%serve.py" 8888 . --bind 127.0.0.1 %DATAOPT%
   echo   [http] starting local server ...
   "%PING%" -n 3 127.0.0.1 >nul
 ) else (

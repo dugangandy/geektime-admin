@@ -18,6 +18,7 @@
 !/test_autobuild.py
 !/test_serve_auth.py
 !/test_mobile_api.py
+!/test_data_dir.py
 
 # 导航模板与 115 门权威清单
 !/_导航模版/

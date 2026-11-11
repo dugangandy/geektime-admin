@@ -17,6 +17,9 @@
 #     MAX_RETRIES=0 ./serve.command
 #     RETRY_BASE=5 RETRY_MAX_WAIT=60 ./serve.command
 #
+# 课程目录可外置：直接改下方 COURSE_DIR 的默认值，或用 GK_DATA_DIR 环境变量指定。
+# 数据目录里只放各门课程的子目录；封面 / 清单 / 模板 / 口令仍在脚本所在目录。
+#
 # 首次使用（Gatekeeper / 执行权限）：
 #   chmod +x serve.command
 #   xattr -d com.apple.quarantine serve.command
@@ -32,6 +35,15 @@ REMOTE_PORT=8888
 REMOTE="$REMOTE_USER@$REMOTE_HOST"
 PYTHON="${PYTHON:-python3}"
 SSHOPT=(-o BatchMode=yes -o ConnectTimeout=8)
+
+# 课程数据目录（只放各门课程的一级子目录）。留空 = 与脚本同目录。
+# 直接改下一行的默认值，或运行时：GK_DATA_DIR="/Volumes/USB/课程" ./serve.command
+COURSE_DIR="${GK_DATA_DIR:-}"
+if [ -n "$COURSE_DIR" ] && [ ! -d "$COURSE_DIR" ]; then
+  echo "  [ERROR] course data folder not found: $COURSE_DIR"
+  read -r -p "Press Enter to close..."
+  exit 1
+fi
 
 # 重连参数（环境变量可覆盖）
 MAX_RETRIES="${MAX_RETRIES:-10}"       # 连续失败上限，0 = 不限
@@ -95,7 +107,12 @@ if [ -n "$(listener_pids)" ]; then
 else
   LOGDIR="${TMPDIR:-/tmp}"
   HTTP_LOG="$(mktemp "$LOGDIR/gk-http.XXXXXX" 2>/dev/null || echo "$DIR/.gk-http.log")"
-  "$PYTHON" "$DIR/serve.py" "$PORT" "$DIR" --bind 127.0.0.1 >"$HTTP_LOG" 2>&1 &
+  if [ -n "$COURSE_DIR" ]; then
+    "$PYTHON" "$DIR/serve.py" "$PORT" "$DIR" --bind 127.0.0.1 \
+        --data-dir "$COURSE_DIR" >"$HTTP_LOG" 2>&1 &
+  else
+    "$PYTHON" "$DIR/serve.py" "$PORT" "$DIR" --bind 127.0.0.1 >"$HTTP_LOG" 2>&1 &
+  fi
   HTTP_PID=$!
   echo "  [http] starting local server ..."
   for _ in 1 2 3 4 5; do

@@ -146,8 +146,10 @@ def parse_catalog_js(text):
 class CourseIndex:
     """课程清单 + catalog.js 解析缓存；只收录磁盘上已有阅读器的课程。"""
 
-    def __init__(self, root, manifest_path=None):
+    def __init__(self, root, manifest_path=None, data_dir=None):
         self.root = os.path.abspath(root)
+        # 课程目录可与服务根分离；清单与封面仍在 root。
+        self.data_dir = os.path.abspath(data_dir) if data_dir else self.root
         self.manifest_path = manifest_path or os.path.join(
             self.root, "_导航模版", "course_manifest.json")
         self._lock = threading.RLock()
@@ -187,7 +189,7 @@ class CourseIndex:
             name = str(entry.get("name") or "").strip()
             if not name:
                 continue
-            course_dir = os.path.join(self.root, name)
+            course_dir = os.path.join(self.data_dir, name)
             catalog_path = os.path.join(course_dir, "reader", "data", "catalog.js")
             if not os.path.isfile(catalog_path):
                 continue
@@ -375,8 +377,10 @@ class ProgressStore:
 
 class MobileAPI:
     def __init__(self, root, store, signer, limiter, global_limiter, audit,
-                 login_sem, cfg):
+                 login_sem, cfg, data_dir=None):
         self.root = os.path.abspath(root)
+        # 课程与媒体文件在 data_dir；清单、封面、学习进度仍在 root。
+        self.data_dir = os.path.abspath(data_dir) if data_dir else self.root
         self.store = store
         self.signer = signer
         self.limiter = limiter
@@ -384,7 +388,8 @@ class MobileAPI:
         self.audit = audit
         self.login_sem = login_sem
         self.cfg = cfg
-        self.index = CourseIndex(self.root, getattr(cfg, "manifest", None))
+        self.index = CourseIndex(self.root, getattr(cfg, "manifest", None),
+                                 data_dir=self.data_dir)
         self.progress = ProgressStore(os.path.join(self.root, ".mobile", "progress.json"))
         self._lesson_lock = threading.RLock()
         self._lesson_cache = OrderedDict()      # path -> (mtime, dict, bytes)
@@ -833,7 +838,9 @@ class MobileAPI:
             return ""
         if not os.path.isfile(target):
             return ""
-        rel_root = os.path.relpath(target, self.root).replace(os.sep, "/")
+        # URL 形如 /<课程名>/...，因此必须以课程数据目录为基准，
+        # 否则外置时会算出 ../ 路径，客户端无法访问。
+        rel_root = os.path.relpath(target, self.data_dir).replace(os.sep, "/")
         return "/" + urllib.parse.quote(rel_root, safe="/")
 
     # ------------------------------------------------------------ 进度

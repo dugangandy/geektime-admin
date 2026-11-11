@@ -6,6 +6,19 @@ rem  executed as commands. Keep every line in this file ASCII.
 cd /d "%~dp0"
 set "ROOT=%~dp0"
 
+rem  Optional: folder holding the per-course subdirectories.
+rem  Leave empty to use this script's folder. Env var GK_DATA_DIR overrides.
+rem  Example: set "DATA_DIR=D:\GeekTime Courses"
+set "DATA_DIR="
+if defined GK_DATA_DIR set "DATA_DIR=%GK_DATA_DIR%"
+if not "%DATA_DIR%"=="" if not exist "%DATA_DIR%\" (
+  echo   [ERROR] course data folder not found: %DATA_DIR%
+  pause
+  exit /b 1
+)
+set "DATAOPT="
+if not "%DATA_DIR%"=="" set DATAOPT=--data-dir "%DATA_DIR%"
+
 echo.
 echo   ==== geekbang offline reader (LAN mode) ====
 echo.
@@ -31,7 +44,7 @@ echo.
 netstat -ano | findstr /c:":8888" | findstr /c:"LISTENING" >nul
 if errorlevel 1 (
   echo   [http] starting server on 0.0.0.0:8888 ...
-  start "gk-http-lan" python "%ROOT%serve.py" 8888 . --bind 0.0.0.0
+  start "gk-http-lan" python "%ROOT%serve.py" 8888 . --bind 0.0.0.0 %DATAOPT%
 ) else (
   echo   [http] port 8888 already listening - close it first if it is bound to 127.0.0.1
   pause

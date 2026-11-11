@@ -44,8 +44,11 @@ class SiteGenerator:
     """首页数据 + 渲染 + 静态副本落盘。"""
 
     def __init__(self, root, manifest_path=None, title=None, color="#f66121",
-                 static_name="index.html", static_min_interval=30.0):
+                 static_name="index.html", static_min_interval=30.0,
+                 data_dir=None):
         self.root = Path(root).resolve()
+        # 课程一级目录可以与模板/清单/封面分开放置；None 表示沿用旧布局。
+        self.data_dir = Path(data_dir).resolve() if data_dir else self.root
         self.catalog = load_catalog(self.root)
         self.manifest_path = (Path(manifest_path).resolve() if manifest_path
                               else self.root / "_导航模版" / "course_manifest.json")
@@ -65,7 +68,7 @@ class SiteGenerator:
     # ---------------------------------------------------------------- 数据
     def _signature(self):
         try:
-            names = tuple(sorted(p.name for p in self.root.iterdir() if p.is_dir()))
+            names = tuple(sorted(p.name for p in self.data_dir.iterdir() if p.is_dir()))
         except OSError:
             names = ()
         stamps = []
@@ -77,7 +80,7 @@ class SiteGenerator:
         metas = []
         for n in names:
             try:
-                metas.append((self.root / n / "course.json").stat().st_mtime_ns)
+                metas.append((self.data_dir / n / "course.json").stat().st_mtime_ns)
             except OSError:
                 metas.append(0)
         return names, tuple(stamps), tuple(metas)
@@ -88,7 +91,9 @@ class SiteGenerator:
         with self._lock:
             if not build_states and key == self._key:
                 return list(self._courses)
-        data = self.catalog.collect_courses(self.root, self.manifest_path, "html", build_states)
+        data = self.catalog.collect_courses(
+            self.root, self.manifest_path, "html", build_states,
+            course_root=self.data_dir)
         with self._lock:
             self._key, self._courses = key, data
         return list(data)
@@ -121,7 +126,12 @@ class SiteGenerator:
             self._last_static = now
             self._static_key = self._key
         try:
-            html = self.catalog.render_index(courses, self.title, self.color, offline=True)
+            # 静态副本供 file:// 双击，课程链接要指到外置数据目录；
+            # 在线首页的 /<课程名>/... URL 由 serve.py 的双根映射处理，无需前缀。
+            prefix = self.catalog.course_href_prefix(self.root, self.data_dir)
+            html = self.catalog.render_index(
+                courses, self.title, self.color, offline=True,
+                course_prefix=prefix)
             self.catalog.write_static_index(self.root, html, self.static_name)
         except Exception as exc:                       # 落盘失败不影响在线首页
             log.warning("静态首页落盘失败：%s", exc)
@@ -130,8 +140,11 @@ class SiteGenerator:
 class BuildQueue:
     """按需构建队列：单锁串行、幂等、状态可查。"""
 
-    def __init__(self, root, build_py=None, jobs=4, timeout=1800, on_done=None):
+    def __init__(self, root, build_py=None, jobs=4, timeout=1800, on_done=None,
+                 data_dir=None):
         self.root = Path(root).resolve()
+        # 课程目录与构建器模板可以分属两处：reader/ 产物写回 data_dir。
+        self.data_dir = Path(data_dir).resolve() if data_dir else self.root
         self.build_py = (Path(build_py) if build_py
                          else self.root / "_阅读器模板" / "build.py")
         self.jobs = max(1, int(jobs))
@@ -145,7 +158,7 @@ class BuildQueue:
         """本地一级课程子目录（跳过规则与 build_catalog.scan 保持一致）。"""
         names = set()
         try:
-            entries = list(self.root.iterdir())
+            entries = list(self.data_dir.iterdir())
         except OSError:
             return names
         for p in entries:
@@ -175,7 +188,7 @@ class BuildQueue:
         return None
 
     def reader_index(self, name):
-        return self.root / name / "reader" / "index.html"
+        return self.data_dir / name / "reader" / "index.html"
 
     # ---------------------------------------------------------------- 状态
     def status(self, name):
@@ -224,14 +237,14 @@ class BuildQueue:
                 raise RuntimeError("找不到构建器：%s" % self.build_py)
             # 课程目录里的 course.json 可覆写阅读器标题（默认用目录名）
             title = real
-            meta_file = self.root / real / "course.json"
+            meta_file = self.data_dir / real / "course.json"
             if meta_file.is_file():
                 try:
                     title = (json.loads(meta_file.read_text(encoding="utf-8")).get("title")
                              or real)
                 except (OSError, ValueError):
                     pass
-            cmd = [sys.executable, str(self.build_py), str(self.root / real),
+            cmd = [sys.executable, str(self.build_py), str(self.data_dir / real),
                    "--title", title, "--jobs", str(self.jobs)]
             log.info("构建开始：%s", real)
             proc = subprocess.run(cmd, cwd=str(self.build_py.parent),

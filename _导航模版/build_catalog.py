@@ -25,12 +25,16 @@
     # 指定目录 / 标题 / 主题色 / 输出文件
     python build_catalog.py "E:/.../极客时间" --title "极客时间 · 课程总目录" --out index.html
 
+    # 课程文件夹放在别处，首页仍写到服务根目录
+    python build_catalog.py --data-dir "D:/课程数据"
+
     # 只看统计结果，不写文件
     python build_catalog.py --dry-run
 
 参数
 ----
-    dir           要扫描的根目录，默认脚本所在目录的上一级
+    dir           服务根目录（写 index.html / 封面 / 读 catalog.html），默认脚本上一级
+    --data-dir    课程文件夹所在目录，默认与 dir 相同
     --content-dir 课程正文子目录名，默认 html（仅在无 reader 时用于兜底统计讲数）
     --title       页面大标题，默认 "<根目录名> · 课程总目录"
     --color       主题色（十六进制），默认 #f66121
@@ -876,20 +880,26 @@ def _manifest_record(m):
     }
 
 
-def collect_courses(root, manifest_path=None, content_dir_name="html", build_states=None):
+def collect_courses(root, manifest_path=None, content_dir_name="html",
+                    build_states=None, course_root=None):
     """合并「本地课程子目录」与「115 门权威清单」，返回统一课程记录。
+
+    root 是服务根（catalog.html、assets/covers 等资源仍放这里）；course_root
+    是课程一级目录所在位置，默认等于 root。课程卡片 href 始终是不带前缀的
+    相对 URL，在线由服务端映射，离线由 render_index 的 course_prefix 补前缀。
 
     state：reader / nav / pending（待生成） / building / failed / none（清单占位）。
     元数据优先级：course.json > 现有分类规则与 catalog.html > manifest 补空。
     """
     root = Path(root)
+    course_root = Path(course_root) if course_root else root
     build_states = build_states or {}
     web_meta = load_web_meta(root)
-    local = scan(root, content_dir_name, web_meta)
+    local = scan(course_root, content_dir_name, web_meta)
 
     by_key = {}
     for c in local:
-        meta = load_course_meta(root / c["name"])
+        meta = load_course_meta(course_root / c["name"])
         if meta:
             _apply_course_meta(c, meta)
         if c["state"] != "reader":                  # 已有 reader 永远优先直接打开
@@ -898,7 +908,7 @@ def collect_courses(root, manifest_path=None, content_dir_name="html", build_sta
                 c["state"] = "building"
             elif st == "failed":
                 c["state"] = "failed"
-            elif c["state"] == "none" and has_content(root / c["name"], content_dir_name):
+            elif c["state"] == "none" and has_content(course_root / c["name"], content_dir_name):
                 c["state"] = "pending"              # 本地有内容但还没建 reader
         c["local"] = True
         by_key[_cat_key(c["name"])] = c
@@ -936,8 +946,44 @@ def collect_courses(root, manifest_path=None, content_dir_name="html", build_sta
     return courses
 
 
-def render_index(courses, title, color="#f66121", offline=False):
-    """与服务端共用的渲染入口。offline=True 时待生成卡片降级为不可点。"""
+def course_href_prefix(root, course_root=None):
+    """离线静态首页里课程链接的前缀（相对服务根），课程目录外置时才非空。
+
+    同一盘符返回 ``../../课程数据/`` 形式的相对路径；Windows 跨盘符无法用相对
+    路径表达，退回 ``file:///...`` 绝对地址（换机器/移动目录后需重新生成副本）。
+    """
+    root = Path(root).resolve()
+    course_root = Path(course_root).resolve() if course_root else root
+    if course_root == root:
+        return ""
+    try:
+        rel = os.path.relpath(str(course_root), str(root))
+    except ValueError:
+        try:
+            return course_root.as_uri() + "/"
+        except ValueError:
+            return ""
+    if rel in ("", "."):
+        return ""
+    return urllib.parse.quote(rel.replace(os.sep, "/") + "/", safe="/")
+
+
+def render_index(courses, title, color="#f66121", offline=False,
+                 course_prefix=""):
+    """与服务端共用的渲染入口。offline=True 时待生成卡片降级为不可点。
+
+    course_prefix 只用于离线副本（file:// 双击）；在线首页的 /<课程名>/...
+    由 serve.py 的双根映射处理，绝不能带前缀。
+    """
+    if offline and course_prefix:
+        patched = []
+        for c in courses:
+            c = dict(c)
+            href = c.get("href") or ""
+            if href and not href.startswith("/"):
+                c["href"] = course_prefix + href
+            patched.append(c)
+        courses = patched
     return render(courses, title, color, offline=offline)
 
 
@@ -964,7 +1010,9 @@ def write_static_index(root, text, out_name="index.html"):
 
 def main():
     ap = argparse.ArgumentParser(add_help=True, description="生成分类版课程总目录 index.html")
-    ap.add_argument("dir", nargs="?", default=None, help="要扫描的根目录，默认脚本目录的上一级")
+    ap.add_argument("dir", nargs="?", default=None, help="服务根目录，默认脚本目录的上一级")
+    ap.add_argument("--data-dir", default=None,
+                    help="课程文件夹所在目录，默认与 dir 相同（课程外置时指定）")
     ap.add_argument("--content-dir", default="html", help="课程正文子目录名，默认 html")
     ap.add_argument("--title", default=None, help="页面标题，默认「<根目录名> · 课程总目录」")
     ap.add_argument("--color", default="#f66121", help="主题色，如 #f66121")
@@ -979,25 +1027,30 @@ def main():
 
     here = Path(__file__).resolve().parent
     root = Path(args.dir).expanduser().resolve() if args.dir else here.parent
+    data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else root
     if not root.is_dir():
         sys.exit(f"[错误] 目录不存在：{root}")
+    if not data_dir.is_dir():
+        sys.exit(f"[错误] 课程数据目录不存在：{data_dir}")
 
     manifest_path = None
     if not args.no_manifest:
         manifest_path = (Path(args.manifest).expanduser().resolve()
                          if args.manifest else here / MANIFEST_NAME)
-    courses = collect_courses(root, manifest_path, args.content_dir)
+    courses = collect_courses(root, manifest_path, args.content_dir,
+                              course_root=data_dir)
     if not courses:
-        sys.exit(f"[错误] {root} 下没有课程子目录")
+        sys.exit(f"[错误] {data_dir} 下没有课程子目录")
 
     fetch_covers(courses, root)
 
     title = args.title or f"{root.name} · 课程总目录"
-    page = render_index(courses, title, args.color, offline=True)
+    page = render_index(courses, title, args.color, offline=True,
+                        course_prefix=course_href_prefix(root, data_dir))
 
     groups = grouped(courses)
     local_n = sum(1 for c in courses if c.get("local"))
-    print(f"[扫描] {root}")
+    print(f"[扫描] {data_dir}")
     print(f"       清单 {len(courses)} 门（本地目录 {local_n} 门），"
           f"音频合计 {sum(c.get('audios', 0) for c in courses)} 个")
     for dkey, items in groups:

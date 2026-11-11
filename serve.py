@@ -16,6 +16,11 @@
     python serve.py --revoke-sessions     # 作废所有已登录会话（不改口令）
     python serve.py                       # 127.0.0.1:8888（缺 auth.json 会提示并退出）
     python serve.py 8888 . --bind 127.0.0.1 --trust-proxy
+    python serve.py 8888 . --data-dir "D:/课程数据"    # 课程文件夹放在别处
+
+课程数据目录（--data-dir / GK_DATA_DIR）只放各门课程的一级子目录；
+catalog.html、封面、清单、模板、auth.json、index.html 等仍以 root 为准。
+未指定时 data_dir == root，行为与旧版完全一致。
 
 部署注意：经 ssh -R 反向隧道暴露时，client_address 恒为 127.0.0.1，
 按 IP 的限流会退化为全局限流，因此全局兜底常开；切勿按回环地址做免登录豁免。
@@ -23,6 +28,7 @@
 import argparse
 import base64
 import binascii
+import functools
 import gzip
 import hashlib
 import hmac
@@ -512,6 +518,47 @@ class Handler(SimpleHTTPRequestHandler):
         if os.path.splitext(path)[1].lower() in (".html", ".htm"):
             return "private, no-cache"      # 重建后尽快生效
         return "private, max-age=86400"
+
+    # ---------------------------------------------------------------- 双根映射
+    @staticmethod
+    def _course_segment(name):
+        """一级目录是否可能是课程：与 build_catalog.scan / BuildQueue.allowed 一致。"""
+        return not (name.startswith(("_", ".")) or name.endswith("_old")
+                    or name == "assets")
+
+    def translate_path(self, path):
+        """课程文件夹外置时，把 /<课程名>/... 映射到 data_dir，其余仍走服务根。
+
+        先复用父类结果（unquote / normpath / 丢弃 `..`），再按首段分流：只有首段
+        在 data_dir 下确实是目录且不是站点资源时才映射。URL 契约 /<课程名>/...
+        不变，因此鉴权、敏感扩展 404、Range/gzip/缓存、登出注入全部照旧。
+        """
+        local = super().translate_path(path)
+        srv = self.server
+        root = getattr(srv, "root", None)
+        data_dir = getattr(srv, "data_dir", None)
+        if not root or not data_dir or os.path.normcase(root) == os.path.normcase(data_dir):
+            return local
+        base = os.path.abspath(getattr(self, "directory", None) or root)
+        try:
+            rel = os.path.relpath(os.path.normpath(local), base)
+        except ValueError:
+            return local
+        if rel in ("", ".", "..") or rel.startswith(".." + os.sep):
+            return local
+        parts = rel.split(os.sep)
+        if not self._course_segment(parts[0]):
+            return local
+        if not os.path.isdir(os.path.join(data_dir, parts[0])):
+            return local
+        mapped = os.path.join(data_dir, *parts)
+        try:
+            real_root = os.path.realpath(data_dir)
+            if os.path.commonpath([real_root, os.path.realpath(mapped)]) != real_root:
+                return local
+        except (ValueError, OSError):
+            return local
+        return mapped
 
     def _try_open(self):
         """把请求路径解析成本地文件；打不开返回 None（交给父类处理 301/404/列表）。"""
@@ -1246,6 +1293,9 @@ def parse_args(argv=None):
     ap = argparse.ArgumentParser(description="极客时间离线资料服务（带口令门禁）")
     ap.add_argument("port", nargs="?", type=int, default=8888)
     ap.add_argument("root", nargs="?", default=".")
+    ap.add_argument("--data-dir", default=None,
+                    help="课程文件夹所在目录（只放各门课程的一级子目录）；"
+                         "默认与 root 相同，也可用环境变量 GK_DATA_DIR 指定")
     ap.add_argument("--bind", default="127.0.0.1")
     ap.add_argument("--quiet", action="store_true", help="不打印访问日志")
     ap.add_argument("--auth-file", default=None, help="默认 <root>/auth.json")
@@ -1277,6 +1327,17 @@ def parse_args(argv=None):
 def create_server(cfg):
     """按 cfg 装配服务。测试与 main 共用。cfg 需含 root/auth_file 等全部字段。"""
     root = os.path.abspath(cfg.root)
+    # 优先级：--data-dir > 环境变量 GK_DATA_DIR > root。
+    # 口令管理子命令不经过这里，因此不必存在课程目录也能设置口令。
+    data_arg = getattr(cfg, "data_dir", None)
+    if data_arg is None:
+        data_arg = os.environ.get("GK_DATA_DIR") or None
+    data_dir = os.path.abspath(data_arg or root)
+    if not os.path.isdir(data_dir):
+        sys.stderr.write(
+            "\n  [data] 课程数据目录不存在：%s\n"
+            "         请用 --data-dir 指定包含各门课程子目录的文件夹\n\n" % data_dir)
+        raise SystemExit(2)
     if not cfg.auth_file:
         cfg.auth_file = os.path.join(root, "auth.json")
     store = AuthStore(cfg.auth_file)
@@ -1288,9 +1349,13 @@ def create_server(cfg):
         raise SystemExit(2)
 
     os.chdir(root)
-    httpd = ThreadingHTTPServer((cfg.bind, cfg.port), Handler)
+    # 显式固定静态服务基准，避免依赖请求发生时的 CWD（测试会恢复 CWD）。
+    httpd = ThreadingHTTPServer(
+        (cfg.bind, cfg.port), functools.partial(Handler, directory=root))
     httpd.daemon_threads = True
     httpd.cfg = cfg
+    httpd.root = root
+    httpd.data_dir = data_dir
     httpd.store = store
     httpd.signer = SessionSigner(store)
     httpd.limiter = RateLimiter(cfg.lock_fail_count, cfg.lock_window_sec,
@@ -1306,7 +1371,8 @@ def create_server(cfg):
         httpd.api = mobile_api.MobileAPI(
             root=root, store=store, signer=httpd.signer,
             limiter=httpd.limiter, global_limiter=httpd.global_limiter,
-            audit=httpd.audit, login_sem=httpd.login_sem, cfg=cfg)
+            audit=httpd.audit, login_sem=httpd.login_sem, cfg=cfg,
+            data_dir=data_dir)
     except Exception as exc:
         sys.stderr.write("  [api] 未启用：%s\n" % exc)
     # 登出按钮注入目标：绝对路径归一化，/ 与 /index.html 自动都命中。
@@ -1320,7 +1386,9 @@ def create_server(cfg):
     httpd.build_queue = None
     if os.path.isfile(os.path.join(root, "_导航模版", "build_catalog.py")):
         try:
-            site = site_generator.SiteGenerator(root, manifest_path=getattr(cfg, "manifest", None))
+            site = site_generator.SiteGenerator(
+                root, manifest_path=getattr(cfg, "manifest", None),
+                data_dir=data_dir)
         except Exception as exc:
             sys.stderr.write("  [site] 未启用动态首页：%s\n" % exc)
         else:
@@ -1330,7 +1398,7 @@ def create_server(cfg):
                     httpd.build_queue = site_generator.BuildQueue(
                         root, jobs=getattr(cfg, "build_jobs", 4),
                         timeout=getattr(cfg, "build_timeout", 1800),
-                        on_done=site.invalidate)
+                        on_done=site.invalidate, data_dir=data_dir)
     return httpd
 
 
@@ -1381,6 +1449,8 @@ def main(argv=None):
     print("serving %s on http://%s:%d/  auth=%s" % (
         os.path.abspath(cfg.root), cfg.bind, cfg.port,
         "off" if cfg.no_auth else "on"), flush=True)
+    if os.path.normcase(httpd.data_dir) != os.path.normcase(httpd.root):
+        print("courses: %s (external data dir)" % httpd.data_dir, flush=True)
     if getattr(httpd, "site", None) is not None:
         print("home: dynamic (%d 门课程)  autobuild=%s" % (
             len(httpd.site.courses()), "on" if httpd.build_queue else "off"), flush=True)
