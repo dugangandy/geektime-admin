@@ -173,16 +173,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildNav(): LinearLayout {
         val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        bar.addView(View(this).apply {
+            setBackgroundColor(c(R.color.line))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+        })
+        val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(c(R.color.surface))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(56)
             )
         }
-        bar.addView(View(this).apply {
-            setBackgroundColor(c(R.color.line))
-            layoutParams = LinearLayout.LayoutParams(1, ViewGroup.LayoutParams.MATCH_PARENT)
-        }, 0)
+        bar.addView(row)
         val icons = arrayOf(R.drawable.ic_book, R.drawable.ic_stats, R.drawable.ic_person)
         val labels = arrayOf("课程", "学习", "我的")
         val iconViews = ArrayList<ImageView>()
@@ -196,20 +203,24 @@ class MainActivity : AppCompatActivity() {
                 background = Ui.ripple(this@MainActivity, android.graphics.Color.TRANSPARENT, 0f)
                 setOnClickListener { selectTab(i, true) }
             }
-            val icon = Ui.icon(this, icons[i], c(R.color.text_dim), 23, labels[i])
+            // 图标和文字都占满整格、各自在格内居中，不依赖父布局 gravity，两者就不会错位
+            val icon = Ui.icon(this, icons[i], c(R.color.text_dim), 23, labels[i]).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(23)
+                )
+            }
             val label = Ui.text(this, labels[i], 10f, c(R.color.text_dim), false, 1).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(2), 0, 0)
-                // 垂直 LinearLayout 默认给 MATCH_PARENT 宽，必须显式包住内容才能和图标对齐
                 layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 )
             }
             item.addView(icon)
             item.addView(label)
             iconViews.add(icon)
             labelViews.add(label)
-            bar.addView(item)
+            row.addView(item)
         }
         navIcons = iconViews
         navLabels = labelViews
