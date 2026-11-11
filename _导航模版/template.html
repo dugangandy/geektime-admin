@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}} - 导航</title>
+<style>
+  :root {
+    --accent: {{ACCENT}};
+    --accent-dark: {{ACCENT_DARK}};
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+    color: #2c3e50;
+    line-height: 1.6;
+    padding: 20px;
+  }
+  body.has-player { padding-bottom: 90px; }
+  header {
+    text-align: center;
+    padding: 30px 20px 20px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    color: white;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+  header h1 { font-size: 2em; margin-bottom: 8px; }
+  header p { opacity: 0.9; font-size: 1em; }
+  .search-bar { max-width: 700px; margin: 16px auto 0; position: relative; }
+  .search-bar input {
+    width: 100%;
+    padding: 12px 16px 12px 44px;
+    border: none;
+    border-radius: 24px;
+    font-size: 15px;
+    background: white;
+    color: #2c3e50;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    outline: none;
+  }
+  .search-bar input:focus { box-shadow: 0 2px 12px rgba(0,0,0,0.25); }
+  .search-bar::before {
+    content: "\1F50D";
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+  }
+  main { max-width: 1100px; margin: 0 auto; }
+  section { margin-bottom: 32px; }
+  section h2 {
+    font-size: 1.3em;
+    color: var(--accent-dark);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e1e8ed;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  section h2 .count {
+    font-size: 0.65em;
+    color: #95a5a6;
+    font-weight: normal;
+    background: #ecf0f1;
+    padding: 2px 10px;
+    border-radius: 10px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    display: block;
+    position: relative;
+    padding: 14px 16px;
+    background: white;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #2c3e50;
+    border-left: 4px solid var(--accent);
+    transition: all 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    font-size: 14px;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border-left-color: var(--accent-dark);
+  }
+  .card .num {
+    display: inline-block;
+    min-width: 28px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .card.has-audio { padding-right: 46px; }
+  .card .play {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 26px;
+    line-height: 26px;
+    text-align: center;
+    border-radius: 50%;
+    background: #eef6f9;
+    color: var(--accent);
+    font-size: 12px;
+    opacity: 0.7;
+    cursor: pointer;
+    user-select: none;
+  }
+  .card:hover .play { opacity: 1; background: var(--accent); color: #fff; }
+  .card.playing { background: #f2fbfe; border-left-color: var(--accent-dark); }
+  .card.playing .play { background: var(--accent-dark); color: #fff; opacity: 1; }
+  .hidden { display: none !important; }
+  .no-result {
+    text-align: center;
+    padding: 40px;
+    color: #95a5a6;
+    font-style: italic;
+  }
+  footer {
+    text-align: center;
+    color: #95a5a6;
+    font-size: 0.85em;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  .player {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #fff;
+    border-top: 1px solid #e1e8ed;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+    z-index: 99;
+  }
+  .player .ptitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    color: #2c3e50;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .player audio { flex: 0 0 auto; height: 36px; max-width: 420px; }
+  .player button {
+    flex: 0 0 auto;
+    width: 32px; height: 32px;
+    border: none;
+    border-radius: 6px;
+    background: #ecf0f1;
+    color: #2c3e50;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .player button:hover { background: var(--accent); color: #fff; }
+  @media (max-width: 640px) {
+    .player { flex-wrap: wrap; }
+    .player audio { max-width: 100%; width: 100%; order: 3; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{TITLE}}</h1>
+  <p>{{SUBTITLE}}</p>
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="搜索章节标题…" autocomplete="off">
+  </div>
+</header>
+
+<main>
+{{SECTIONS}}
+  <div class="no-result hidden" id="noResult">未找到匹配的章节</div>
+</main>
+
+<footer>{{FOOTER}}</footer>
+
+<div class="player hidden" id="player">
+  <div class="ptitle" id="playerTitle"></div>
+  <audio id="audio" controls></audio>
+  <button id="prevBtn" title="上一节">&#9198;</button>
+  <button id="nextBtn" title="下一节">&#9197;</button>
+  <button id="closeBtn" title="关闭播放器">&#10005;</button>
+</div>
+
+<script>
+  /* ---------- 搜索过滤 ---------- */
+  var search = document.getElementById('search');
+  var sections = document.querySelectorAll('section');
+  var noResult = document.getElementById('noResult');
+
+  search.addEventListener('input', function () {
+    var q = search.value.trim().toLowerCase();
+    var totalVisible = 0;
+    sections.forEach(function (sec) {
+      var visible = 0;
+      sec.querySelectorAll('.card').forEach(function (card) {
+        var match = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
+        card.classList.toggle('hidden', !match);
+        if (match) visible++;
+      });
+      sec.classList.toggle('hidden', visible === 0);
+      totalVisible += visible;
+    });
+    noResult.classList.toggle('hidden', totalVisible > 0);
+  });
+
+  /* ---------- 音频播放 ---------- */
+  var player = document.getElementById('player');
+  var playerTitle = document.getElementById('playerTitle');
+  var audio = document.getElementById('audio');
+  var buttons = [].slice.call(document.querySelectorAll('.play'));
+  var current = -1;
+
+  function playIndex(i) {
+    if (i < 0 || i >= buttons.length) return;
+    current = i;
+    buttons.forEach(function (b, idx) { b.closest('.card').classList.toggle('playing', idx === i); });
+    playerTitle.textContent = buttons[i].getAttribute('data-title') || '';
+    audio.src = buttons[i].getAttribute('data-src');
+    player.classList.remove('hidden');
+    document.body.classList.add('has-player');
+    var p = audio.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+
+  buttons.forEach(function (btn, i) {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (i === current && !audio.paused) { audio.pause(); } else { playIndex(i); }
+    });
+  });
+
+  document.getElementById('prevBtn').addEventListener('click', function () { playIndex(current - 1); });
+  document.getElementById('nextBtn').addEventListener('click', function () { playIndex(current + 1); });
+  document.getElementById('closeBtn').addEventListener('click', function () {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    player.classList.add('hidden');
+    document.body.classList.remove('has-player');
+    buttons.forEach(function (b) { b.closest('.card').classList.remove('playing'); });
+    current = -1;
+  });
+  audio.addEventListener('ended', function () { playIndex(current + 1); });
+</script>
+</body>
+</html>

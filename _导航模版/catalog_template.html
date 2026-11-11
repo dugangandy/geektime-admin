@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<style>
+  /* ---------- 设计变量：暖灰纸面 + 墨色文字 + 品牌橙点睛 ---------- */
+  :root {
+    --accent: {{ACCENT}};
+    --accent-dark: {{ACCENT_DARK}};
+    /* 小字号文字用加深橙，保证白底对比度 ≥ 4.5:1（--accent 只用于装饰） */
+    --accent-ink: #c2410c;
+    --accent-soft: #fff1e9;
+    --accent-soft-hover: #ffe1d0;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --ink: #17181c;
+    --ink-2: #5b5f6a;
+    --ink-3: #6f7681;
+    --line: #e8e9ec;
+    --shadow-hover: 0 10px 28px rgba(23, 24, 28, 0.09);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-soft); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- 顶部导航：sticky + 毛玻璃，滚动时出线 ---------- */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    border-bottom: 1px solid var(--line);
+    transition: box-shadow 0.25s;
+  }
+  .topbar.scrolled { box-shadow: 0 4px 16px rgba(23, 24, 28, 0.06); }
+  .topbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-height: 60px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  /* 顶栏品牌同时是页面唯一 h1，重置标题默认样式 */
+  h1.logo { display: flex; align-items: center; margin: 0; font-size: inherit; font-weight: inherit; line-height: 1.4; }
+  .logo-img { display: block; height: 28px; width: auto; }
+  .logo-img[hidden] { display: none; }
+  .logo-text {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .logo-text::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 2.5px;
+    background: var(--accent);
+  }
+  .logo-text[hidden] { display: none; }
+  .search-bar { position: relative; margin-left: auto; width: min(320px, 44vw); }
+  .search-bar input {
+    width: 100%;
+    padding: 9px 16px 9px 38px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-family: inherit;
+    background: var(--surface);
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .search-bar input::placeholder { color: var(--ink-3); }
+  .search-bar input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(246, 97, 33, 0.14);
+  }
+  .search-bar::before {
+    content: "\1F50D";
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    opacity: 0.55;
+  }
+
+  /* ---------- 筛选区 ---------- */
+  .filters {
+    padding-top: 24px;
+    margin-bottom: 36px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px 4px; align-items: center; }
+  .chips + .chips { margin-top: 8px; }
+  .chips-label {
+    font-size: 13px;
+    color: var(--ink-3);
+    margin-right: 6px;
+    white-space: nowrap;
+  }
+  .chip {
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-2);
+    transition: all 0.2s;
+  }
+  .chip:hover { background: var(--bg); color: var(--ink); }
+  .chip.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .chip span { opacity: 0.55; margin-left: 3px; font-size: 0.85em; font-variant-numeric: tabular-nums; }
+  .sub-chips .chip { font-size: 12.5px; padding: 5px 12px; }
+
+  /* ---------- 内容区：编号分区 + 卡片网格 ---------- */
+  main { counter-reset: sec; }
+  section { margin-bottom: 56px; }
+  section h2 {
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  section h2::before {
+    counter-increment: sec;
+    content: counter(sec, decimal-leading-zero);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent-ink);
+    font-variant-numeric: tabular-nums;
+  }
+  section h2 .count {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 400;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  /* 卡片自身作容器，窄卡紧凑样式见卡片样式块末尾的 @container 规则 */
+  .card { container-type: inline-size; }
+  .card {
+    display: flex;
+    gap: 18px;
+    position: relative;
+    min-width: 0;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  }
+  a.card:hover {
+    transform: translateY(-3px);
+    border-color: #d8dae0;
+    box-shadow: var(--shadow-hover);
+  }
+  a.card:hover .card-title { color: var(--accent-ink); }
+  a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .cover-wrap { position: relative; flex: none; width: 102px; }
+  .cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 102px;
+    height: 134px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f2f3f5, #e8e9ec);
+  }
+  .cover-none { font-size: 30px; font-weight: 700; color: var(--ink-3); }
+  .web-badge {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(135deg, #ff6a3d, var(--accent));
+    padding: 2px 7px;
+    border-radius: 8px 0 8px 0;
+    letter-spacing: 0.3px;
+  }
+  .card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .card-title {
+    margin: 0;
+    font-size: 16.5px;
+    font-weight: 650;
+    line-height: 1.35;
+    transition: color 0.2s;
+  }
+  .teacher { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .author { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+  .identity {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    padding: 1px 8px;
+    border-radius: 6px;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .num {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  /* 按钮固定在信息区右下角 */
+  .card-foot {
+    margin-top: auto;
+    display: flex;
+    justify-content: flex-end;
+  }
+  /* 浅橙底 pill（参考官网「试读」按钮） */
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12.5px;
+    font-weight: 400;
+    line-height: 1;
+    padding: 7px 18px;
+    border-radius: 6px;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    border: none;
+    transition: background 0.2s, color 0.2s;
+  }
+  a.card:hover .cta { background: var(--accent-soft-hover); }
+  .cta.wip, .cta.off { color: var(--ink-3); background: #f2f3f5; }
+  .cta.pending { color: var(--accent-ink); background: var(--accent-soft-hover); }
+  .cta.building { color: var(--ink-3); background: #eef1f6; }
+  .cta.failed { color: #b42318; background: #fef3f2; }
+  a.card:hover .cta.wip { background: #f2f3f5; color: var(--ink-3); }
+  .card.off { background: var(--bg); border-style: dashed; }
+  /* 窄卡（4 列档位）紧凑排布：压缩封面、收起头衔 pill，保证信息区可读 */
+  @container (max-width: 300px) {
+    .cover-wrap, .cover { width: 84px; }
+    .cover { height: 110px; }
+    .cover-none { font-size: 24px; }
+    .card-title { font-size: 15px; }
+    .identity { display: none; }
+  }
+
+  .hidden { display: none !important; }
+  .no-result {
+    text-align: center;
+    padding: 56px 20px;
+    color: var(--ink-3);
+    font-size: 14px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ---------- 页脚：细线 + 小字 ---------- */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 26px 24px 34px;
+    text-align: center;
+    color: var(--ink-3);
+    font-size: 12.5px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ---------- 入场动效：分区渐入，尊重 reduced-motion ---------- */
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.5s ease, transform 0.5s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .card, .chip { transition: none; }
+  }
+
+  /* ---------- 响应式 ---------- */
+  /* 大屏放宽容器：网格自适应到 4 列 */
+  @media (min-width: 1440px) {
+    .wrap { max-width: 1320px; }
+  }
+  @media (max-width: 720px) {
+    section { margin-bottom: 44px; }
+  }
+  @media (max-width: 640px) {
+    .topbar-inner { flex-wrap: wrap; gap: 10px; }
+    .search-bar { margin-left: 0; width: 100%; }
+    .grid { grid-template-columns: 1fr; gap: 12px; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding: 0 18px; }
+    .logo-img { height: 24px; }
+    .chip { font-size: 12.5px; padding: 5px 12px; }
+    .card { padding: 14px; gap: 14px; }
+    .cover-wrap, .cover { width: 84px; }
+    .cover { height: 110px; }
+    .cover-none { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<!-- 按主题分类：{{CATS_COMMENT}} -->
+<header class="topbar" id="topbar">
+  <div class="wrap topbar-inner">
+    <h1 class="logo">
+      <img class="logo-img" src="assets/logo.png" alt="{{BRAND}}"
+           onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+      <span class="logo-text" hidden>{{BRAND}}</span>
+    </h1>
+    <div class="search-bar" role="search">
+      <input type="text" id="search" placeholder="搜索课程名…"
+             aria-label="搜索课程" autocomplete="off">
+    </div>
+  </div>
+</header>
+
+<nav class="filters wrap">
+  <div class="chips" id="statusChips">{{STATUS_CHIPS}}</div>
+  <div class="chips sub-chips" id="chips"><span class="chips-label">方向：</span>{{CHIPS}}</div>
+</nav>
+
+<main class="wrap">
+{{SECTIONS}}
+  <div class="no-result hidden" id="noResult">未找到匹配的课程</div>
+</main>
+
+<footer>{{FOOTER}}</footer>
+
+<script>
+  /* ---------- 搜索 + 分类筛选 ---------- */
+  var search = document.getElementById('search');
+  var sections = [].slice.call(document.querySelectorAll('main section'));
+  var cards = [].slice.call(document.querySelectorAll('.card'));
+  var catChips = [].slice.call(document.querySelectorAll('#chips .chip'));
+  var statusChips = [].slice.call(document.querySelectorAll('#statusChips .chip'));
+  var noResult = document.getElementById('noResult');
+  var catFilter = 'all';
+  var statusFilter = 'all';
+
+  cards.forEach(function (card) { card.dataset.search = (card.dataset.name || card.textContent).toLowerCase(); });
+
+  function apply() {
+    var q = search.value.trim().toLowerCase();
+    var total = 0;
+    sections.forEach(function (sec) {
+      var okCat = catFilter === 'all' || sec.dataset.cat === catFilter;
+      var visible = 0;
+      sec.querySelectorAll('.card').forEach(function (card) {
+        var okText = !q || card.dataset.search.indexOf(q) !== -1;
+        var okStatus = statusFilter === 'all' || card.dataset.status === statusFilter;
+        card.classList.toggle('hidden', !(okCat && okText && okStatus));
+        if (okCat && okText && okStatus) visible++;
+      });
+      sec.classList.toggle('hidden', !okCat || visible === 0);
+      total += visible;
+    });
+    noResult.classList.toggle('hidden', total > 0);
+  }
+
+  search.addEventListener('input', apply);
+  catChips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      // 分类 chips 没有「全部」项：再次点击已选中的分类即取消筛选
+      if (chip.classList.contains('active')) {
+        chip.classList.remove('active');
+        catFilter = 'all';
+      } else {
+        catChips.forEach(function (c) { c.classList.remove('active'); });
+        chip.classList.add('active');
+        catFilter = chip.dataset.cat;
+      }
+      apply();
+    });
+  });
+  statusChips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      statusChips.forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      statusFilter = chip.dataset.status;
+      apply();
+    });
+  });
+
+  /* ---------- 筛选按钮的 aria-pressed 状态同步 ---------- */
+  function syncPressed() {
+    catChips.concat(statusChips).forEach(function (c) {
+      c.setAttribute('aria-pressed', c.classList.contains('active') ? 'true' : 'false');
+    });
+  }
+  syncPressed();
+  document.getElementById('chips').addEventListener('click', syncPressed);
+  document.getElementById('statusChips').addEventListener('click', syncPressed);
+
+  /* ---------- 顶栏滚动出线 ---------- */
+  var topbar = document.getElementById('topbar');
+  window.addEventListener('scroll', function () {
+    topbar.classList.toggle('scrolled', window.scrollY > 8);
+  }, { passive: true });
+
+  /* ---------- 分区渐入（尊重 prefers-reduced-motion） ---------- */
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.06 });
+    sections.forEach(function (sec) { sec.classList.add('reveal'); io.observe(sec); });
+  }
+</script>
+</body>
+</html>

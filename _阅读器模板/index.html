@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>离线阅读器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="assets/shell.css">
+</head>
+<body>
+
+<div class="readbar" id="readbar"></div>
+
+<!-- ============================ 左侧目录 ============================ -->
+<aside class="sidebar" id="sidebar">
+  <div class="side-scroll">
+    <a class="logo" href="../../index.html" title="返回课程总目录">
+      <img class="logo-img" src="assets/logo.png" alt="极客时间">
+    </a>
+
+    <div class="course">
+      <h2 class="course-title" id="courseTitle"></h2>
+      <p class="course-role" id="courseRole"></p>
+      <div class="course-stat">
+        <span class="stat-user">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 4.5V21h16v-2.5C20 16 16 14 12 14z"/></svg>
+          <em id="statTotal">0</em> 讲已下载
+        </span>
+        <button class="btn-detail" type="button" id="btnDetail">查看详情</button>
+      </div>
+    </div>
+
+    <div class="search">
+      <input id="search" type="text" placeholder="搜索课程内容" autocomplete="off">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M10 4a6 6 0 1 0 3.7 10.7l4.3 4.3 1.4-1.4-4.3-4.3A6 6 0 0 0 10 4zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+    </div>
+
+    <div class="toc-head">
+      <span class="toc-title">课程目录</span>
+      <span class="toc-prog">已完成 <em id="readNum">0</em>/共 <span id="totalNum">0</span> 讲</span>
+    </div>
+
+    <nav class="toc" id="toc"></nav>
+
+    <div class="side-foot">
+      <span>离线阅读器 · 目录 / 正文 / 音频均取自本地课程文件</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ============================ 右侧正文 ============================ -->
+<main class="main">
+  <header class="topbar">
+    <button class="hamburger" id="btnSide" type="button" title="收起目录">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M3 5h18v2H3zM3 11h18v2H3zM3 17h18v2H3z"/></svg>
+    </button>
+    <h1 class="top-title" id="topTitle"></h1>
+    <div class="top-right">
+      <button class="top-act" id="btnSound" type="button" title="播放/暂停本讲音频">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+      </button>
+      <span class="avatar" title="本地账号">
+        <svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2.2c-3.6 0-7.5 1.8-7.5 4.3V21h15v-2.5c0-2.5-3.9-4.3-7.5-4.3z" fill="currentColor"/></svg>
+      </span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <iframe id="viewer" src="pages/000.html" title="正文"></iframe>
+  </div>
+</main>
+
+<!-- ============================ 右侧工具条 ============================ -->
+<div class="rail">
+  <button class="rail-btn" data-act="share" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M14 5l7 6-7 6v-4H9a5 5 0 0 0-5 5v1H2v-1a7 7 0 0 1 7-7h5V5z"/></svg>
+    <span>分享</span>
+  </button>
+  <button class="rail-btn" data-act="fav" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M12 17.3l-6 3.7 1.7-7L2 9.2l7-.6L12 2l3 6.6 7 .6-5.7 4.8 1.7 7z"/></svg>
+    <span>收藏</span>
+    <em class="badge" id="badgeFav" hidden></em>
+  </button>
+  <button class="rail-btn" data-act="like" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M12 21s-8-5-8-10a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 11c0 5-8 10-8 10z"/></svg>
+    <span>点赞</span>
+  </button>
+  <button class="rail-btn" data-act="note" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M4 3h16v14H9l-5 4V3zm3 4v2h10V7H7zm0 4v2h7v-2H7z"/></svg>
+    <span>笔记</span>
+  </button>
+  <button class="rail-btn" data-act="info" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+    <span>说明</span>
+  </button>
+  <button class="rail-btn rail-top" data-act="top" type="button">
+    <svg viewBox="0 0 24 24" class="ic"><path d="M12 5l7 7-1.4 1.4L13 8.8V20h-2V8.8L6.4 13.4 5 12z"/></svg>
+    <span>顶部</span>
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data/catalog.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

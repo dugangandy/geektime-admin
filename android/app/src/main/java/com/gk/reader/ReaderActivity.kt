@@ -1,0 +1,651 @@
+package com.gk.reader
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.net.Uri
+import android.os.Bundle
+import android.os.SystemClock
+import android.text.TextUtils
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.SeekBar
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.URLDecoder
+import java.util.Locale
+
+class ReaderActivity : AppCompatActivity() {
+
+    companion object {
+        private const val EXTRA_COURSE = "courseId"
+        private const val EXTRA_IDX = "idx"
+        private const val EXTRA_COURSE_NAME = "courseName"
+        private const val EXTRA_TITLE = "title"
+
+        fun open(ctx: Context, courseId: String, idx: Int, courseName: String = "", title: String = "") {
+            ctx.startActivity(
+                Intent(ctx, ReaderActivity::class.java)
+                    .putExtra(EXTRA_COURSE, courseId)
+                    .putExtra(EXTRA_IDX, idx)
+                    .putExtra(EXTRA_COURSE_NAME, courseName)
+                    .putExtra(EXTRA_TITLE, title)
+            )
+        }
+    }
+
+    private val api: Api get() = (application as GkApp).api
+    private lateinit var prefs: Prefs
+    private lateinit var web: WebView
+    private lateinit var titleText: TextView
+    private lateinit var metaText: TextView
+    private lateinit var progressLine: ProgressLine
+    private lateinit var audioBar: LinearLayout
+    private lateinit var audioTitle: TextView
+    private lateinit var audioSub: TextView
+    private lateinit var audioToggle: android.widget.ImageView
+    private lateinit var audioSeek: SeekBar
+    private lateinit var audioTime: TextView
+    private lateinit var loading: ProgressBar
+
+    private var courseId = ""
+    private var idx = 0
+    private var courseName = ""
+    private var lesson: LessonDetail? = null
+    private var progressMap: Map<Int, LessonProgress> = emptyMap()
+    private var savedPos = 0.0
+    private var restored = false
+    private var lastReport = 0L
+    private var completedShown = false
+    private var draggingSeek = false
+    private var observer: ((PlayState) -> Unit)? = null
+    private var detailCache: CourseDetail? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        prefs = (application as GkApp).prefs
+        courseId = intent.getStringExtra(EXTRA_COURSE).orEmpty()
+        idx = intent.getIntExtra(EXTRA_IDX, 0)
+        courseName = intent.getStringExtra(EXTRA_COURSE_NAME).orEmpty()
+        if (courseId.isEmpty()) {
+            finish()
+            return
+        }
+        buildUi()
+        loadProgress()
+        loadLesson(false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        web.onResume()
+        audioBar.post { renderAudio(PlayerController.state()) }
+    }
+
+    override fun onPause() {
+        report(true)
+        web.onPause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        observer?.let { PlayerController.unobserve(it) }
+        observer = null
+        web.destroy()
+        super.onDestroy()
+    }
+
+    override fun onBackPressed() {
+        report(true)
+        super.onBackPressed()
+    }
+
+    // ------------------------------------------------------------ 布局
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun buildUi() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(c(R.color.bg))
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(6), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+            )
+        }
+        bar.addView(Ui.icon(this, R.drawable.ic_back, c(R.color.text), 24) {
+            report(true)
+            finish()
+        })
+        titleText = Ui.text(this, "阅读", 15f, c(R.color.text), true, 1).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(dp(4), 0, dp(6), 0)
+        }
+        bar.addView(titleText)
+        bar.addView(Ui.text(this, "Aa", 17f, c(R.color.text), true, 1).apply {
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            isClickable = true
+            setOnClickListener { showTextDialog() }
+        })
+        bar.addView(Ui.icon(this, R.drawable.ic_more, c(R.color.text), 22) { showMore() }
+            .apply { contentDescription = "更多" })
+        root.addView(bar)
+
+        progressLine = ProgressLine(this, 2f).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2))
+        }
+        root.addView(progressLine)
+
+        metaText = Ui.text(this, "", 12f, c(R.color.text_dim), false, 1).apply {
+            setPadding(dp(16), dp(4), dp(16), dp(6))
+            text = courseName
+        }
+        root.addView(metaText)
+
+        val frame = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        web = WebView(this).apply {
+            setBackgroundColor(c(R.color.bg))
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            settings.apply {
+                javaScriptEnabled = false
+                domStorageEnabled = false
+                allowFileAccess = false
+                allowContentAccess = false
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                setSupportZoom(false)
+                builtInZoomControls = false
+                cacheMode = WebSettings.LOAD_DEFAULT
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            }
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val url = request?.url?.toString() ?: return false
+                    return handleUrl(url)
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    loading.visibility = View.GONE
+                    if (!restored) {
+                        restored = true
+                        if (savedPos > 0) view?.scrollTo(0, savedPos.toInt())
+                    }
+                    updateProgress()
+                }
+            }
+        }
+        frame.addView(web, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        loading = ProgressBar(this).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(32), dp(32)).apply { gravity = Gravity.CENTER }
+        }
+        frame.addView(loading)
+        root.addView(frame)
+        web.viewTreeObserver.addOnScrollChangedListener { updateProgress() }
+
+        audioBar = buildAudioBar()
+        root.addView(audioBar)
+        setContentView(root)
+
+        observer = PlayerController.observe { state -> renderAudio(state) }
+    }
+
+    private fun buildAudioBar(): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setBackgroundColor(c(R.color.surface))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        box.addView(View(this).apply {
+            setBackgroundColor(c(R.color.line))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(14), 0)
+        }
+        audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 26) { toggleAudio() }
+        row.addView(audioToggle)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(8), 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            isClickable = true
+            setOnClickListener { openPlayer() }
+        }
+        audioTitle = Ui.text(this, "讲述", 13f, c(R.color.text), true, 1)
+        audioSub = Ui.text(this, "", 11f, c(R.color.text_dim), false, 1)
+        col.addView(audioTitle)
+        col.addView(audioSub)
+        row.addView(col)
+        audioTime = Ui.text(this, "00:00 / 00:00", 11f, c(R.color.text_dim), false, 1)
+        row.addView(audioTime)
+        box.addView(row)
+
+        audioSeek = SeekBar(this).apply {
+            max = 1000
+            progress = 0
+            setPadding(dp(12), 0, dp(12), 0)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {}
+                override fun onStartTrackingTouch(bar: SeekBar?) { draggingSeek = true }
+                override fun onStopTrackingTouch(bar: SeekBar?) {
+                    draggingSeek = false
+                    val s = PlayerController.state()
+                    if (s.hasItem && s.durationMs > 0) {
+                        PlayerController.seekTo(s.durationMs * (bar?.progress ?: 0) / 1000)
+                    }
+                }
+            })
+        }
+        box.addView(audioSeek, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(30)
+        ))
+        return box
+    }
+
+    // ------------------------------------------------------------ 数据
+    private fun loadProgress() {
+        lifecycleScope.launch {
+            try {
+                val progress = api.progressCourse(courseId)
+                withContext(Dispatchers.Main) {
+                    progressMap = progress.lessons
+                    savedPos = progress.lessons[idx]?.pos ?: 0.0
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun loadLesson(switchIdx: Boolean) {
+        val target = idx
+        loading.visibility = View.VISIBLE
+        restored = false
+        completedShown = false
+        savedPos = progressMap[target]?.pos ?: 0.0
+        lifecycleScope.launch {
+            try {
+                val data = api.lesson(courseId, target)
+                withContext(Dispatchers.Main) {
+                    if (target != idx) return@withContext
+                    lesson = data
+                    titleText.text = "${data.idx} | ${data.title}"
+                    metaText.text = listOf(data.course, data.author, data.duration)
+                        .filter { it.isNotBlank() }.joinToString(" · ")
+                    audioBar.visibility = if (data.audioUrl.isNotEmpty()) View.VISIBLE else View.GONE
+                    audioTitle.text = "讲述 ${data.author.ifEmpty { data.course }}"
+                    audioSub.text = data.title
+                    audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"
+                    setAudioIcon(false)
+                    injectCookies()
+                    web.loadDataWithBaseURL(api.baseUrl, buildHtml(data), "text/html", "utf-8", null)
+                }
+            } catch (e: AuthExpired) {
+                startActivity(
+                    Intent(this@ReaderActivity, LoginActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                )
+                finish()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    loading.visibility = View.GONE
+                    Ui.toast(this@ReaderActivity, "正文加载失败：${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun injectCookies() {
+        val cookies = api.cookieHeader().split("; ").filter { it.contains("=") }
+        val manager = CookieManager.getInstance()
+        manager.setAcceptCookie(true)
+        for (pair in cookies) manager.setCookie(api.baseUrl, pair)
+        manager.flush()
+    }
+
+    private fun buildHtml(data: LessonDetail): String {
+        val css = assets.open("article.css").bufferedReader().use { it.readText() }
+        val dark = isDark()
+        val fs = prefs.fontSp
+        val lh = when (prefs.lineSpacing) {
+            0 -> 1.5
+            2 -> 1.95
+            else -> 1.75
+        }
+        val bg = if (dark) "#121212" else "#FFFFFF"
+        val fg = if (dark) "#E6E6E6" else "#333333"
+        val dim = if (dark) "#9AA0A6" else "#8A8F99"
+        val line = if (dark) "#2C2C30" else "#E8E8E8"
+        val soft = if (dark) "#1C1C1E" else "#F7F7F9"
+        val code = if (dark) "#1E1E1E" else "#F6F7F9"
+        val override = """
+            body.article-page{background:$bg;color:$fg;font-size:${fs}px;line-height:$lh;padding:0 16px 32px;}
+            .gk-content{max-width:100%;padding-left:0;padding-right:0;margin:0;}
+            .kind-simple .gk-content{color:$fg;font-size:${fs}px;line-height:$lh;}
+            .kind-simple .gk-content h1,.kind-simple .gk-content h2,
+            .kind-simple .gk-content h3,.kind-simple .gk-content h4{color:$fg;}
+            .kind-simple .gk-content p{margin:0 0 1.15em;}
+            .gk-content a,.kind-simple .gk-content a{color:${if (dark) "#FF7A3D" else "#F66121"};}
+            .gk-content img,.gk-content video{max-width:100%;height:auto;${if (dark) "filter:brightness(.9);" else ""}}
+            .kind-simple .gk-content blockquote{background:$soft;border-left:3px solid ${if (dark) "#FF7A3D" else "#F66121"};color:$fg;padding:10px 14px;}
+            .kind-simple .gk-content pre{background:$code;color:$fg;overflow-x:auto;padding:12px;}
+            .kind-simple .gk-content code{background:$code;color:$fg;}
+            .kind-simple .gk-content th{background:$soft;color:$fg;}
+            .kind-simple .gk-content th,.kind-simple .gk-content td{border-color:$line;}
+            .kind-simple .gk-content hr{border-top-color:$line;}
+            .kind-simple .gk-content table{display:block;overflow-x:auto;}
+            .gk-nav{margin:30px 0 6px;display:flex;flex-direction:column;gap:10px;}
+            .gk-nav a{display:block;padding:12px 14px;border:1px solid $line;border-radius:10px;text-decoration:none;color:$fg;}
+            .gk-nav .t{display:block;font-size:12px;color:$dim;margin-bottom:4px;}
+            .gk-nav .e{color:$dim;font-size:13px;padding:6px 2px;}
+        """.trimIndent()
+
+        val nav = StringBuilder("<div class=\"gk-nav\">")
+        val prev = data.prev
+        val next = data.next
+        if (prev != null) {
+            nav.append("<a href=\"gk://prev/${prev.idx}\"><span class=\"t\">上一讲</span>")
+                .append(escape(prev.title)).append("</a>")
+        } else {
+            nav.append("<div class=\"e\">已经是第一讲</div>")
+        }
+        if (next != null) {
+            nav.append("<a href=\"gk://next/${next.idx}\"><span class=\"t\">下一讲</span>")
+                .append(escape(next.title)).append("</a>")
+        } else {
+            nav.append("<div class=\"e\">已经是最后一讲</div>")
+        }
+        nav.append("</div>")
+
+        return """
+            <!doctype html>
+            <html lang="zh-CN"><head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3">
+            <style>$css
+$override</style>
+            </head><body class="article-page">
+            <div class="kind-simple"><div class="gk-content">${data.bodyHtml}</div></div>
+            $nav
+            </body></html>
+        """.trimIndent()
+    }
+
+    private fun escape(value: String): String = TextUtils.htmlEncode(value)
+
+    // ------------------------------------------------------------ 链接
+    private fun handleUrl(url: String): Boolean {
+        if (url.startsWith("gk://")) {
+            val uri = Uri.parse(url)
+            val target = uri.lastPathSegment?.toIntOrNull() ?: return true
+            report(true)
+            idx = target
+            loading.visibility = View.VISIBLE
+            loadLesson(true)
+            return true
+        }
+        val uri = Uri.parse(url)
+        if (uri.scheme == "http" || uri.scheme == "https") {
+            val server = Uri.parse(api.baseUrl)
+            val sameHost = uri.host == server.host && uri.port == server.port
+            val page = Regex("/pages/(\\d{1,4})\\.html").find(uri.path.orEmpty())
+            if (sameHost && page != null) {
+                report(true)
+                idx = page.groupValues[1].toInt()
+                loading.visibility = View.VISIBLE
+                loadLesson(true)
+                return true
+            }
+            if (sameHost) {
+                // 站内其它页面（目录/PDF 等）交给浏览器会丢登录态，直接忽略
+                return true
+            }
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+        }
+        return true
+    }
+
+    // ------------------------------------------------------------ 进度
+    private fun maxScroll(): Int {
+        val scale = web.scale
+        val content = (web.contentHeight * scale).toInt()
+        return (content - web.height).coerceAtLeast(0)
+    }
+
+    private fun currentPct(): Double {
+        val max = maxScroll()
+        if (max <= dp(8)) return 100.0
+        return (web.scrollY * 100.0 / max).coerceIn(0.0, 100.0)
+    }
+
+    private fun updateProgress() {
+        val pct = currentPct().toFloat()
+        progressLine.pct = pct
+        if (pct >= 88f && !completedShown && lesson != null) {
+            completedShown = true
+            Ui.toast(this, "已学完本讲")
+        }
+        report(false)
+    }
+
+    private fun report(force: Boolean, markRead: Boolean = false) {
+        val data = lesson ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastReport < 3000) return
+        lastReport = now
+        val max = maxScroll()
+        val pos = web.scrollY.toDouble()
+        val pct = currentPct()
+        val read = markRead || pct >= 88.0
+        lifecycleScope.launch {
+            runCatching {
+                api.postProgress(courseId, data.idx, pct, pos, max.toDouble(), read, 0)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ 音频
+    private fun toggleAudio() {
+        val data = lesson ?: return
+        val state = PlayerController.state()
+        if (state.hasItem && state.courseId == courseId && state.lessonIdx == data.idx) {
+            PlayerController.toggle()
+        } else {
+            playQueue()
+        }
+    }
+
+    private fun openPlayer() {
+        val data = lesson ?: return
+        val state = PlayerController.state()
+        if (!state.hasItem || state.courseId != courseId || state.lessonIdx != data.idx) {
+            playQueue()
+        } else {
+            PlayerActivity.open(this)
+        }
+    }
+
+    private fun playQueue() {
+        val data = lesson ?: return
+        if (data.audioUrl.isEmpty()) return
+        lifecycleScope.launch {
+            try {
+                val detail = detailCache ?: api.course(courseId).also { detailCache = it }
+                val queue = detail.lessons.filter { it.hasAudio && it.audioUrl.isNotEmpty() }.map {
+                    QueueItem(courseId, detail.name, detail.coverUrl, it.idx, it.label, it.audioUrl)
+                }
+                val index = queue.indexOfFirst { it.idx == data.idx }.coerceAtLeast(0)
+                withContext(Dispatchers.Main) {
+                    PlayerController.play(this@ReaderActivity, queue, index)
+                }
+            } catch (e: AuthExpired) {
+                startActivity(
+                    Intent(this@ReaderActivity, LoginActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                )
+                finish()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { Ui.toast(this@ReaderActivity, "无法开始播放：${e.message}") }
+            }
+        }
+    }
+
+    private fun setAudioIcon(playing: Boolean) {
+        audioToggle.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        audioToggle.setColorFilter(c(R.color.text))
+    }
+
+    private fun renderAudio(state: PlayState) {
+        val data = lesson ?: return
+        val mine = state.hasItem && state.courseId == courseId && state.lessonIdx == data.idx
+        if (mine) {
+            setAudioIcon(state.playing)
+            val dur = if (state.durationMs > 0) state.durationMs else durationMsOf(data)
+            audioTime.text = "${Ui.formatMs(state.positionMs)} / ${Ui.formatMs(dur)}"
+            if (!draggingSeek) {
+                audioSeek.progress = if (dur > 0) {
+                    (state.positionMs * 1000 / dur).toInt().coerceIn(0, 1000)
+                } else 0
+            }
+            audioSub.text = if (state.buffering) "缓冲中…" else data.title
+        } else {
+            setAudioIcon(false)
+            if (!draggingSeek) audioSeek.progress = 0
+            audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"
+        }
+    }
+
+    private fun durationMsOf(data: LessonDetail): Long {
+        val parts = data.duration.split(":")
+        return when (parts.size) {
+            2 -> ((parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)) * 1000L
+            3 -> ((parts[0].toIntOrNull() ?: 0) * 3600 +
+                (parts[1].toIntOrNull() ?: 0) * 60 + (parts[2].toIntOrNull() ?: 0)) * 1000L
+            else -> 0L
+        }
+    }
+
+    // ------------------------------------------------------------ 菜单
+    private fun showTextDialog() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val fontLabel = Ui.text(this, "正文字号 ${prefs.fontSp}sp", 13f, c(R.color.text_dim), false, 1)
+        box.addView(fontLabel)
+        var pendingFont = prefs.fontSp
+        box.addView(SeekBar(this).apply {
+            max = 7
+            progress = (prefs.fontSp - 15).coerceIn(0, 7)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    pendingFont = progress + 15
+                    fontLabel.text = "正文字号 ${pendingFont}sp"
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        })
+        box.addView(Ui.text(this, "行距", 13f, c(R.color.text_dim), false, 1).apply {
+            setPadding(0, dp(10), 0, dp(6))
+        })
+        val spacingRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        var pendingSpacing = prefs.lineSpacing
+        val spacingLabels = arrayOf("紧凑", "标准", "宽松")
+        val spacingChips = ArrayList<TextView>()
+        for (i in 0 until 3) {
+            val chip = Ui.chip(this, spacingLabels[i], i == pendingSpacing).apply {
+                setOnClickListener {
+                    pendingSpacing = i
+                    for (j in 0 until 3) {
+                        val on = j == i
+                        spacingChips[j].setTextColor(if (on) Color.WHITE else c(R.color.text))
+                        spacingChips[j].background = if (on) Ui.roundBg(this@ReaderActivity, Ui.ORANGE, 16f)
+                        else Ui.roundBg(this@ReaderActivity, c(R.color.surface_alt), 16f)
+                    }
+                }
+            }
+            spacingChips.add(chip)
+            spacingRow.addView(chip)
+        }
+        box.addView(spacingRow)
+
+        AlertDialog.Builder(this)
+            .setTitle("排版")
+            .setView(box)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("应用") { _, _ ->
+                val fontChanged = pendingFont != prefs.fontSp
+                val spacingChanged = pendingSpacing != prefs.lineSpacing
+                prefs.fontSp = pendingFont
+                prefs.lineSpacing = pendingSpacing
+                if (fontChanged || spacingChanged) {
+                    val keep = web.scrollY
+                    lesson?.let { data ->
+                        restored = false
+                        savedPos = keep.toDouble()
+                        web.loadDataWithBaseURL(api.baseUrl, buildHtml(data), "text/html", "utf-8", null)
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun showMore() {
+        val data = lesson
+        val labels = ArrayList<String>()
+        val actions = ArrayList<() -> Unit>()
+        if (data != null && data.pdfUrl.isNotEmpty()) {
+            labels.add("PDF 原稿")
+            actions.add { Pdf.open(this, data.pdfUrl) }
+        }
+        labels.add("标记为已学完")
+        actions.add {
+            report(true, markRead = true)
+            progressLine.pct = 100f
+            Ui.toast(this, "已标记为学完")
+        }
+        labels.add("刷新正文")
+        actions.add {
+            val keep = web.scrollY
+            savedPos = keep.toDouble()
+            restored = false
+            loadLesson(true)
+        }
+        AlertDialog.Builder(this)
+            .setItems(labels.toTypedArray()) { dialog, which ->
+                dialog.dismiss()
+                actions[which]()
+            }
+            .show()
+    }
+}

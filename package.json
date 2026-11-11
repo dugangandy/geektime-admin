@@ -1,0 +1,11 @@
+{
+  "name": "geektime-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "极客时间本地课程库 · Android 客户端",
+  "scripts": {
+    "bump": "node android/tools/bump-version.js",
+    "dist:apk": "node android/tools/build-apk.js",
+    "dist:apk:release": "node android/tools/build-apk.js --release"
+  }
+}

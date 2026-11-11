@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="orange">#F66121</color>
+    <color name="orange_soft">#FFF1EA</color>
+    <color name="bg">#FFFFFF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_alt">#F6F7F9</color>
+    <color name="text">#1A1A1A</color>
+    <color name="text_dim">#8A8F99</color>
+    <color name="line">#ECEDEF</color>
+    <color name="green">#17A673</color>
+    <color name="red">#E5484D</color>
+    <color name="scrim">#99000000</color>
+</resources>
