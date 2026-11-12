@@ -576,7 +576,12 @@ def cover_src(course):
 
 
 def fetch_covers(courses, out_dir):
-    """把官网封面下载到 <out_dir>/assets/covers/（幂等），并给 course 填 cover_file。"""
+    """把官网封面下载到 <out_dir>/assets/covers/（幂等），并给 course 填 cover_file。
+
+    网页端按 cover_filename() 归一化名查找封面，手机端按课程目录原名查找
+    （mobile_api._extra_courses）；含空格或标点时两者不同，故额外补写一份
+    原名副本，保证两端都能显示。
+    """
     todo = [c for c in courses if c.get("cover_url")]
     if not todo:
         return
@@ -590,17 +595,23 @@ def fetch_covers(courses, out_dir):
             print(f"[警告] 封面文件名冲突：{seen[fname]} 与 {c['name']} 归一化后同名（{fname}）")
         seen[fname] = c["name"]
         dst = covers / fname
+        downloaded = False
         if not dst.is_file():
             # 官网缩略图参数从 127x167 提到 240x316，保证 2x 屏清晰
             url = c["cover_url"].replace("w_127,h_167", "w_240,h_316")
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=20) as r, open(dst, "wb") as f:
-                    f.write(r.read())
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    dst.write_bytes(r.read())
                 fresh += 1
+                downloaded = True
             except Exception as e:
                 print(f"[警告] 封面下载失败 {c['name']}：{e}")
                 continue
+        # 手机端按目录原名查找；归一化名不同则补一份副本，主图重下时同步刷新
+        alias = c["name"] + ".webp"
+        if alias != fname and (downloaded or not (covers / alias).is_file()):
+            (covers / alias).write_bytes(dst.read_bytes())
         c["cover_file"] = fname
     if fresh:
         print(f"[封面] 新下载 {fresh} 张 → {covers}")
