@@ -35,6 +35,11 @@ C. 只有 Markdown（没有 html）
      <课程>/images/<id>/xxx.png      （md 里用 ![](images/<id>/xxx.png) 引用）
    md 与 md 同名附件（mp3/pdf）会按文件名自动配对；同目录同时存在同名 .html 时以 html 为准。
 
+D. 纯视频 / 纯音频（没有文字稿）
+     <课程>/01 xxx.mp4          （或 视频/01 xxx.mp4、mp3/01 xxx.mp3）
+   媒体文件自己就是一讲：视频生成 <video> 播放页，音频生成 <audio> 播放条；
+   同序号只是附件的文件不单独成讲。视频优先于音频（同一讲两者都有时取视频）。
+
 支持的正文来源（自动识别）
 --------------------------
 1. 极客时间原站「整页保存」：正文在 div._1Bj6HN3x_0，样式来自 se-* 的 <style data-jss>
@@ -52,6 +57,7 @@ C. 只有 Markdown（没有 html）
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -78,6 +84,8 @@ except ImportError:  # pragma: no cover
     _fitz = None
 
 AUDIO_EXTS = ('.m4a', '.mp3', '.aac', '.wav', '.ogg', '.flac', '.opus')
+# 视频讲次：只收浏览器 / WebView 原生能播的容器，mkv、flv 之类不列（改为附件亦不可播）
+VIDEO_EXTS = ('.mp4', '.m4v', '.webm', '.mov')
 
 PAGES_DIR = ''      # 输出 pages 目录，md 转 html 时用于重写图片相对路径
 OUT_DIR = ''        # 阅读器输出根目录
@@ -89,6 +97,9 @@ TPL_INDEX = os.path.join(HERE, 'index.html')
 TPL_ASSETS = os.path.join(HERE, 'assets')
 
 OUT_NAME = 'reader'                 # 默认输出目录名
+# 课程目录里的产物目录，扫描正文/附件时一律跳过
+# （mp4-opt 是 faststart_mp4.py 的默认输出目录，里面的 mp4 只是副本）
+SKIP_DIRS = (OUT_NAME, 'mp4-opt')
 DEFAULT_ROLE = ''                   # 默认头衔，可用 --role 覆盖
 
 # 附件子目录名（pdf/ mp3/ 音频/ …）。为空表示自动扫描课程根目录下的一级子目录，
@@ -216,7 +227,7 @@ def sub_dirs(root):
     out = []
     for n in names:
         p = os.path.join(root, n)
-        if n.startswith(('_', '.')) or n == OUT_NAME or not os.path.isdir(p):
+        if n.startswith(('_', '.')) or n in SKIP_DIRS or not os.path.isdir(p):
             continue
         out.append(p)
     return out
@@ -343,7 +354,10 @@ def stem_no(stem):
 
 
 def article_files(dir_path):
-    """目录下的正文文件：.html 优先，其次 .md，最后才是 .pdf（纯 PDF 课程）。"""
+    """目录下的正文文件：.html 优先，其次 .md，最后才是 .pdf（纯 PDF 课程）。
+
+    没有任何文字的讲次按媒体文件成讲：视频（mp4/m4v/webm/mov）优先于音频。
+    """
     try:
         names = os.listdir(dir_path)
     except OSError:
@@ -359,6 +373,15 @@ def article_files(dir_path):
     taken_nos = {n for n in (stem_no(s) for s in picked) if n is not None}
     for f in names:
         if not f.lower().endswith('.pdf'):
+            continue
+        stem = os.path.splitext(f)[0]
+        if norm_key(stem) in seen or stem_no(stem) in taken_nos:
+            continue
+        picked[stem] = f
+        seen.add(norm_key(stem))
+    # 视频讲次（纯视频课程的主体）：排在音频之前，同一讲既有 mp4 又有 mp3 时取视频
+    for f in names:
+        if os.path.splitext(f)[1].lower() not in VIDEO_EXTS:
             continue
         stem = os.path.splitext(f)[0]
         if norm_key(stem) in seen or stem_no(stem) in taken_nos:
@@ -383,7 +406,7 @@ def scan_course(course_dir, content_dir=None):
     chapters = []
     for name in sorted(os.listdir(course_dir)):
         p = os.path.join(course_dir, name)
-        if not os.path.isdir(p) or name == OUT_NAME or name.startswith('_'):
+        if not os.path.isdir(p) or name in SKIP_DIRS or name.startswith('_'):
             continue
         if not is_chapter_dir(name):
             continue
@@ -413,25 +436,33 @@ def scan_course(course_dir, content_dir=None):
             flat = os.path.join(course_dir, 'html')
         # 兜底：章节目录没有编号（如「开篇词」「历史背景篇」），把含正文的子目录当章节
         if chapters == [] and flat is None:
-            subs_text, subs_pdf = [], []
+            subs_text, subs_pdf, subs_video = [], [], []
             for name in sorted(os.listdir(course_dir)):
                 p = os.path.join(course_dir, name)
-                if not os.path.isdir(p) or name == OUT_NAME or name.startswith('_'):
+                if not os.path.isdir(p) or name in SKIP_DIRS or name.startswith('_'):
                     continue
                 files = article_files(p)
                 if not files:
                     continue
                 has_text = any(f.lower().endswith(('.html', '.md')) for f in files)
                 has_pdf = any(f.lower().endswith('.pdf') for f in files)
-                if not (has_text or has_pdf):
+                has_video = any(f.lower().endswith(VIDEO_EXTS) for f in files)
+                if not has_text and not has_pdf:
+                    if has_video:
+                        subs_video.append(p)    # 视频/、video/ 这类整目录放视频的布局
                     continue        # 纯音频目录（MP3/、mp3/）是附件目录，不能当章节
                 item = {'no': section_rank(name), 'name': name, 'dir': p, 'files': files}
                 (subs_text if has_text else subs_pdf).append(item)
-            # 同时有 md/ 与 pdf/ 目录时，md 是正文、pdf 只是附件
-            subs = subs_text or subs_pdf
-            if subs:
-                subs.sort(key=lambda c: (c['no'], c['name']))
-                return subs, None
+            # 优先级：文字 > 视频 > 纯 PDF。视频课常把讲义 PDF 放在 课件/ 里，
+            # 那些目录是附件，不能因为「有 pdf」就把整门课当 PDF 课程。
+            if subs_text:
+                subs_text.sort(key=lambda c: (c['no'], c['name']))
+                return subs_text, None
+            if len(subs_video) == 1:
+                return [], subs_video[0]    # 只有视频的子目录，整目录当扁平目录
+            if subs_pdf:
+                subs_pdf.sort(key=lambda c: (c['no'], c['name']))
+                return subs_pdf, None
 
         root_files = article_files(course_dir)
         if flat is None and any(f.lower().endswith(('.html', '.md')) for f in root_files):
@@ -630,6 +661,7 @@ def parse_md_page(task):
         label = normalize_title(file_label(os.path.basename(path)))
 
     audio_file = find_asset(stem, md_dir, root, ('.m4a', '.mp3', '.aac', '.wav'))
+    video_file = find_asset(stem, md_dir, root, VIDEO_EXTS)
     pdf_file = find_asset(stem, md_dir, root, ('.pdf',))
 
     return {
@@ -648,6 +680,7 @@ def parse_md_page(task):
         'css': '',
         'body': md_to_html(raw, md_dir),
         'audio': audio_file,
+        'video': video_file,
         'pdf': pdf_file,
         'kind': 'md',
     }
@@ -697,6 +730,7 @@ def parse_pdf_page(task):
     clean_stem = re.sub(r'[【\[［][^】\]］]*[】\]］]', '', stem).strip()
 
     audio_file = find_asset(stem, pdf_dir, root, ('.m4a', '.mp3', '.aac', '.wav'))
+    video_file = find_asset(stem, pdf_dir, root, VIDEO_EXTS)
     body = pdf_viewer_html(pdf_page_count(path))
 
     return {
@@ -715,17 +749,20 @@ def parse_pdf_page(task):
         'css': '',
         'body': body,
         'audio': audio_file,
+        'video': video_file,
         'pdf': path,
         'kind': 'pdf',
     }
 
 
-def parse_audio_page(task):
-    """解析只有音频、没有文字稿的讲次：正文放提示，播放器照常可用。"""
+def _media_page(task, key, body):
+    """只有素材、没有文字稿的讲次：正文放提示，播放器照常可用。
+
+    key 为 'audio' 或 'video'，决定播放器用哪种媒体元素。
+    """
     ci, ch_name, path, root = task
-    audio_dir = os.path.dirname(path)
+    media_dir = os.path.dirname(path)
     stem = os.path.splitext(os.path.basename(path))[0]
-    pdf_file = find_asset(stem, audio_dir, root, ('.pdf',))
     label = normalize_title(file_label(os.path.basename(path)))
     return {
         'ci': ci,
@@ -736,16 +773,29 @@ def parse_audio_page(task):
         'date': date_from_name(stem),
         'author': '',
         'course_name': '',
-        'duration': audio_duration(path),
+        'duration': audio_duration(path),   # mutagen 也能读 mp4，读不出就留空
         'speaker': '',
         'size': '',
         'cover': '',
         'css': '',
-        'body': '<p class="empty-body">本讲暂无文字稿，可使用上方播放器收听。</p>',
-        'audio': path,
-        'pdf': pdf_file,
+        'body': body,
+        'audio': path if key == 'audio' else None,
+        'video': path if key == 'video' else None,
+        'pdf': find_asset(stem, media_dir, root, ('.pdf',)),
         'kind': 'simple',
     }
+
+
+def parse_audio_page(task):
+    """解析只有音频、没有文字稿的讲次。"""
+    return _media_page(task, 'audio',
+                       '<p class="empty-body">本讲暂无文字稿，可使用上方播放器收听。</p>')
+
+
+def parse_video_page(task):
+    """解析只有视频、没有文字稿的讲次。"""
+    return _media_page(task, 'video',
+                       '<p class="empty-body">本讲暂无文字稿，可使用上方视频播放器观看。</p>')
 
 
 def parse_page(task):
@@ -755,7 +805,10 @@ def parse_page(task):
         return parse_md_page(task)
     if path.lower().endswith('.pdf'):
         return parse_pdf_page(task)
-    if os.path.splitext(path)[1].lower() in AUDIO_EXTS:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in VIDEO_EXTS:
+        return parse_video_page(task)
+    if ext in AUDIO_EXTS:
         return parse_audio_page(task)
     html_dir = os.path.dirname(path)
     stem, _ = os.path.splitext(os.path.basename(path))
@@ -872,6 +925,22 @@ def parse_page(task):
     if audio_file is None:
         audio_file = find_asset(stem, html_dir, root, ('.m4a', '.mp3', '.aac', '.wav'))
 
+    # ---- 视频（有视频稿的讲次：视频优先展示，音频仍保留在播放条）
+    video_file = None
+    v = soup.find('video')
+    if v is not None:
+        src = v.get('src')
+        if not src:
+            s2 = v.find('source')
+            if s2 is not None:
+                src = s2.get('src')
+        if src and not re.match(r'^(https?:|data:|blob:)', src):
+            cand = os.path.normpath(os.path.join(html_dir, src))
+            if os.path.isfile(cand):
+                video_file = cand
+    if video_file is None:
+        video_file = find_asset(stem, html_dir, root, VIDEO_EXTS)
+
     pdf_file = find_asset(stem, html_dir, root, ('.pdf',))
 
     if not duration and audio_file:
@@ -894,6 +963,7 @@ def parse_page(task):
         'css': css,
         'body': body,
         'audio': audio_file,
+        'video': video_file,
         'pdf': pdf_file,
         'kind': 'geek' if is_geek else 'simple',
     }
@@ -913,6 +983,28 @@ def safe_parse(task):
 # pages/NNN.html 只是数据壳：整页 DOM 由 assets/page.js 运行时渲染，
 # 所以改 UI 不用重新生成课程内容（见 sync_ui.py）。
 
+# 外壳里的资源引用（assets 模板文件 + 本课程的目录数据），构建/同步时统一补 ?v= 指纹
+SHELL_URL_RE = re.compile(r'(assets/(?:app\.js|shell\.css)|data/catalog\.js)(?:\?v=[\w.-]+)?')
+
+
+def file_ver(path):
+    """按文件内容取指纹；文件不存在返回 '0'（宁可缓存旧版也不要 404）。"""
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha1(f.read()).hexdigest()[:10]
+    except OSError:
+        return '0'
+
+
+def asset_ver(name):
+    """模板静态资源的缓存版本串：按文件内容取指纹。
+
+    serve.py 对 /assets/ 发 7 天强缓存，脚本里换 URL 才能让旧浏览器拿到新文件；
+    用内容指纹而不是手写版本号，改完 page.js 重新构建即自动生效。
+    """
+    return file_ver(os.path.join(TPL_ASSETS, name))
+
+
 PAGE_TPL = u"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -920,14 +1012,14 @@ PAGE_TPL = u"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="../assets/article.css">
+<link rel="stylesheet" href="../assets/article.css?v=__CSS_V__">
 </head>
 <body class="article-page">
 <noscript>
   <div class="page-fail">本页正文由本地脚本渲染，请在浏览器里启用 JavaScript 后刷新。</div>
 </noscript>
 <script type="application/json" id="lesson-data">__DATA__</script>
-<script src="../assets/page.js"></script>
+<script src="../assets/page.js?v=__PAGE_JS_V__"></script>
 </body>
 </html>
 """
@@ -954,9 +1046,11 @@ def build_meta(a, course_title, course_author=''):
 
 
 def build_sub(a):
-    if not a['audio']:
+    if not a.get('audio') and not a.get('video'):
         return '<span>本讲暂无音频</span>'
     items = []
+    if a.get('video') and not a.get('audio'):
+        items.append('<span>视频</span>')
     if a['speaker']:
         items.append('<span>讲述：%s</span>' % esc(a['speaker']))
     if a['size']:
@@ -980,8 +1074,9 @@ def render_page(a, idx, total, pages_dir, prev_a, next_a, course_title, course_a
         cover = ('<figure class="art-cover"><img src="%s" alt="" '
                  'onerror="this.parentNode.style.display=\'none\'"></figure>') % esc(a['cover'])
 
-    audio_url = rel_url(a['audio'], pages_dir) if a['audio'] else ''
-    pdf_url = rel_url(a['pdf'], pages_dir) if a['pdf'] else ''
+    audio_url = rel_url(a['audio'], pages_dir) if a.get('audio') else ''
+    video_url = rel_url(a['video'], pages_dir) if a.get('video') else ''
+    pdf_url = rel_url(a['pdf'], pages_dir) if a.get('pdf') else ''
 
     body = a['body']
     if PDF_SRC_TOKEN in body:
@@ -1000,6 +1095,7 @@ def render_page(a, idx, total, pages_dir, prev_a, next_a, course_title, course_a
         'sub': build_sub(a),
         'duration': esc(a['duration'] or '--:--'),
         'audio': esc(audio_url or ''),
+        'video': esc(video_url or ''),
         'pdf': esc(pdf_url or ''),
         'body': body,
         'style': a['css'] or '',
@@ -1009,15 +1105,23 @@ def render_page(a, idx, total, pages_dir, prev_a, next_a, course_title, course_a
                  if next_a else None),
     }
     return (PAGE_TPL.replace('__TITLE__', '%s - %s' % (esc(a['label']), esc(course_title)))
+                    .replace('__CSS_V__', asset_ver('article.css'))
+                    .replace('__PAGE_JS_V__', asset_ver('page.js'))
                     .replace('__DATA__', json_payload(data)))
 
 
 # ================================================================ 外壳
 
 def render_shell(out_dir, catalog):
-    """壳与模板完全一致（课程信息由 assets/app.js 从 data/catalog.js 填充）。"""
+    """壳与模板一致（课程信息由 assets/app.js 从 data/catalog.js 填充）。
+
+    只把 assets/app.js、assets/shell.css 的 URL 换成内容指纹，避免 /assets/ 的
+    7 天强缓存继续命中旧壳脚本。sync_ui.py 有一份同样规则的实现。
+    """
     with open(TPL_INDEX, 'r', encoding='utf-8') as f:
         tpl = f.read()
+    tpl = SHELL_URL_RE.sub(
+        lambda m: '%s?v=%s' % (m.group(1), file_ver(os.path.join(out_dir, m.group(1)))), tpl)
     with open(os.path.join(out_dir, 'index.html'), 'w', encoding='utf-8') as f:
         f.write(tpl)
 
@@ -1091,7 +1195,8 @@ def build(course_dir, out_dir, title=None, author=None, role=None,
             for f in files:
                 tasks.append((gi, gname, os.path.join(flat, f), course_dir))
     else:
-        raise SystemExit('没有在 %s 找到任何文章页面（.html / .md）' % course_dir)
+        raise SystemExit('没有在 %s 找到任何可构建的正文或媒体文件'
+                         '（html / md / pdf / mp3 / mp4 等）' % course_dir)
 
     if not quiet:
         print('课程目录: %s' % course_dir)

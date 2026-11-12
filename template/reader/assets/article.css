@@ -298,6 +298,32 @@ body.article-page::-webkit-scrollbar-thumb:hover { background: #c6c6c6; }
   color: var(--text-3);
 }
 
+/* ---------------------------------------------------------- 视频讲次 */
+/* 画面交给浏览器原生控制条（含全屏），外层只做圆角与等比留黑 */
+.player.video-ph {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.video-wrap {
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+  line-height: 0;
+}
+.video-wrap video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+}
+.player.video-ph .player-sub { margin-top: 10px; }
+.video-dl {
+  color: var(--orange);
+  text-decoration: none;
+}
+.video-dl:hover { text-decoration: underline; }
+
 /* 正文数据 / 脚本加载失败时的可见提示（避免白屏无线索） */
 .page-fail {
   margin: 24px 0;

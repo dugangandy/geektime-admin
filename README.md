@@ -23,6 +23,7 @@
 ├── site_generator.py           # 首页数据/缓存/静态副本 + 按需构建队列
 ├── mobile_api.py               # 手机端 /api/* JSON API（纯标准库）
 ├── gen_html.py                 # 历史正文下载/生成脚本，服务运行时不依赖
+├── faststart_mp4.py            # 数据准备：mp4 重封装成 faststart（moov 前置）
 ├── serve.bat                   # Windows 一键：本地服务 + SSH 反向隧道（公网入口）
 ├── serve-lan.bat               # Windows 一键：监听 0.0.0.0 供局域网访问
 ├── serve.command               # macOS 一键：本地服务 + SSH 隧道（断线自动重连）
@@ -62,7 +63,7 @@
 └── .mobile/progress.json       # 手机端学习进度，不入库
 ```
 
-课程目录支持三种布局：分章节目录、扁平 `html/` + 音频/PDF、纯 Markdown（含 `images/` 图片）。详见 `template/reader/build.py` 头部说明。
+课程目录支持四种布局：分章节目录、扁平 `html/` + 音频/PDF、纯 Markdown（含 `images/` 图片）、纯视频（根目录平铺 mp4，或 `视频/` 之类的单独子目录）。没有文字稿的讲次按媒体文件成讲：有视频用 `<video>` 播放器，只有音频用 `<audio>` 播放条。详见 `template/reader/build.py` 头部说明。
 
 ## 环境依赖
 
@@ -204,6 +205,11 @@ python template/reader/build.py "<课程目录>" --title "课程名" --author "�
 # 批量构建（可传名字过滤）
 bash template/reader/build_all.sh
 bash template/reader/build_all.sh Redis
+
+# 视频：重封装成 faststart（moov 前置），不转码；默认写到 <课程>/mp4-opt/
+python faststart_mp4.py "<课程目录>" --dry-run
+python faststart_mp4.py "<课程目录>"
+python faststart_mp4.py "<课程目录>" --in-place --yes    # 原地替换，保留 mtime
 ```
 
 `build.py` 产物为 `<课程>/reader/` 下的 `index.html`、`assets/`、`data/catalog.js`、`pages/NNN.html`；重复执行幂等，不改动课程正文。

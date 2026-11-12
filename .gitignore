@@ -11,6 +11,7 @@
 !/site_generator.py
 !/gen_html.py
 !/mobile_api.py
+!/faststart_mp4.py
 !/serve.bat
 !/serve-lan.bat
 !/serve.command

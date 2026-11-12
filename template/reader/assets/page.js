@@ -58,11 +58,22 @@
     '<svg viewBox="0 0 24 24" class="rate-caret" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   var hasAudio = !!(D.audio && D.audio !== '#');
+  var hasVideo = !!(D.video && D.video !== '#');
   var hasPdf = !!(D.pdf && D.pdf !== '#');
   var duration = D.duration || '--:--';
 
   /* ---------------------------------------------------- 片段 */
   function playerSection() {
+    if (hasVideo) {
+      /* 视频讲次用浏览器原生控制条：全屏、画质、字幕都由浏览器负责 */
+      return '<section class="player video-ph" id="player">\n' +
+        '  <div class="video-wrap"><video id="video" controls playsinline preload="metadata"></video></div>\n' +
+        '  <div class="player-sub">' + (D.sub || '') +
+        '    <a class="video-dl" href="' + D.video + '" download>下载视频</a>\n' +
+        (hasPdf ? '    <a class="video-dl" href="' + D.pdf + '" target="_blank" rel="noopener">PDF 讲稿</a>\n' : '') +
+        '  </div>\n' +
+        '</section>';
+    }
     if (!hasAudio) {
       return '<section class="player audio-ph">\n' +
         '  <div class="player-main"><span class="audio-ph-txt">本讲音频暂未提供，播放器位置已预留</span></div>\n' +
@@ -94,7 +105,7 @@
   }
 
   function miniHtml() {
-    if (!hasAudio) return '';
+    if (!hasAudio || hasVideo) return '';   // 视频有原生控制条，不做悬浮迷你播放器
     return '<div class="mini-player" id="miniPlayer" aria-hidden="true">\n' +
       '  <button class="mp-btn" id="mpBack" type="button" title="后退 15 秒" aria-label="后退 15 秒">' +
       IC_ARC_BACK + '<span class="mp-num">15</span></button>\n' +
@@ -167,7 +178,8 @@
       idx: idx,
       total: D.total,
       title: D.title,
-      hasAudio: hasAudio
+      hasAudio: hasAudio,
+      hasVideo: hasVideo
     });
   }
   // 等外壳脚本挂好监听再上报，避免 ready 消息丢失
@@ -204,7 +216,8 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    // 视频/输入框里的方向键归控件自己（seek / 移动光标），不能再翻篇
+    if (e.target && /input|textarea|video/i.test(e.target.tagName)) return;
     if (e.key === 'ArrowLeft') {
       var p = document.querySelector('.art-nav .prev:not(.off)');
       if (p) location.href = p.getAttribute('href');
@@ -230,6 +243,19 @@
   var total = NaN;
 
   var btnPlay, track, played, loaded, timeTxt, chipCur, rateBtn, rateTxt, btnMute, subDur;
+
+  /* 视频讲次：只挂载媒体与时长回填，播放控制全部交给原生控制条 */
+  var video = document.getElementById('video');
+  if (video) {
+    video.src = D.video;
+    video.addEventListener('loadedmetadata', function () {
+      var sd = document.getElementById('subDur');
+      if (sd && isFinite(video.duration) && /--:--/.test(sd.textContent)) {
+        sd.textContent = '时长：' + fmt(video.duration);
+      }
+    });
+    return;
+  }
 
   function fmt(sec) {
     if (!isFinite(sec) || sec < 0) return '00:00';
