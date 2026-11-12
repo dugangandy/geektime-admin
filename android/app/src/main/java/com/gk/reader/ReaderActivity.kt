@@ -59,6 +59,8 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var titleText: TextView
     private lateinit var metaText: TextView
     private lateinit var progressLine: ProgressLine
+    private lateinit var videoBar: LinearLayout
+    private lateinit var videoSub: TextView
     private lateinit var audioBar: LinearLayout
     private lateinit var audioTitle: TextView
     private lateinit var audioSub: TextView
@@ -185,6 +187,9 @@ class ReaderActivity : AppCompatActivity() {
         }
         root.addView(metaText)
 
+        videoBar = buildVideoBar()
+        root.addView(videoBar)
+
         val frame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -239,6 +244,46 @@ class ReaderActivity : AppCompatActivity() {
         // 提前装好 cookie：setCookie 是异步的，紧贴 loadData 会让首批图片请求裸奔 401
         injectCookies()
         built = true
+    }
+
+    /** 视频讲次：正文上方一条「播放视频」入口，点开走原生播放器（不在 WebView 里播）。 */
+    private fun buildVideoBar(): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(12), dp(10))
+            background = Ui.ripple(this@ReaderActivity, c(R.color.surface_alt), 10f)
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(dp(16), dp(4), dp(16), dp(2)) }
+            setOnClickListener { openVideo() }
+        }
+        box.addView(Ui.icon(this, R.drawable.ic_play, Ui.orange(this), 26))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(10) }
+        }
+        col.addView(Ui.text(this, "播放视频", 14f, c(R.color.text), true, 1))
+        videoSub = Ui.text(this, "", 11f, c(R.color.text_dim), false, 1).apply {
+            setPadding(0, dp(2), 0, 0)
+        }
+        col.addView(videoSub)
+        box.addView(col)
+        box.addView(Ui.icon(this, R.drawable.ic_chevron_right, c(R.color.text_dim), 20))
+        return box
+    }
+
+    /** 从上次播放位置续播；位置与播放器共用 audio_pos，不动阅读滚动位置。 */
+    private fun openVideo() {
+        val data = lesson ?: return
+        if (data.videoUrl.isEmpty()) return
+        VideoActivity.open(
+            this, courseId, data.idx, data.videoUrl, data.title,
+            listOf(data.course, data.author).filter { it.isNotBlank() }.joinToString(" · "),
+            progressMap[data.idx]?.audioPos ?: 0L
+        )
     }
 
     private fun buildAudioBar(): LinearLayout {
@@ -346,6 +391,9 @@ class ReaderActivity : AppCompatActivity() {
                     metaText.text = listOf(data.course, data.author, data.duration)
                         .filter { it.isNotBlank() }.joinToString(" · ")
                     audioBar.visibility = if (data.audioUrl.isNotEmpty()) View.VISIBLE else View.GONE
+                    videoBar.visibility = if (data.videoUrl.isNotEmpty()) View.VISIBLE else View.GONE
+                    videoSub.text = listOf(data.course, data.duration)
+                        .filter { it.isNotBlank() }.joinToString(" · ")
                     audioTitle.text = "讲述 ${data.author.ifEmpty { data.course }}"
                     audioSub.text = data.title
                     audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"

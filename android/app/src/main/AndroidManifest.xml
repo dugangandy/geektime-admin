@@ -46,6 +46,13 @@
             android:exported="false"
             android:launchMode="singleTop" />
 
+        <!-- 视频讲次：原生 ExoPlayer 播放，转屏不重建（否则会从头播） -->
+        <activity
+            android:name=".VideoActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode" />
+
         <service
             android:name=".PlaybackService"
             android:exported="true"

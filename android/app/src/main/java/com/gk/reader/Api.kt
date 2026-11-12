@@ -234,8 +234,10 @@ class Api(context: Context, val prefs: Prefs) {
                                 dur = o.optString("dur"),
                                 hasAudio = o.optBoolean("has_audio"),
                                 hasPdf = o.optBoolean("has_pdf"),
+                                hasVideo = o.optBoolean("has_video"),
                                 audioUrl = o.optString("audio_url"),
                                 pdfUrl = o.optString("pdf_url"),
+                                videoUrl = o.optString("video_url"),
                                 read = o.optBoolean("read"),
                                 pct = o.optDouble("pct", 0.0),
                                 pos = o.optDouble("pos", 0.0)
@@ -277,6 +279,7 @@ class Api(context: Context, val prefs: Prefs) {
             coverUrl = json.optString("cover_url"),
             audioUrl = json.optString("audio_url"),
             pdfUrl = json.optString("pdf_url"),
+            videoUrl = json.optString("video_url"),
             bodyHtml = json.optString("body_html"),
             prev = parseNav(json.optJSONObject("prev")),
             next = parseNav(json.optJSONObject("next"))

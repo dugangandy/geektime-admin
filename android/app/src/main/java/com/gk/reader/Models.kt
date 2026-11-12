@@ -30,8 +30,10 @@ data class LessonItem(
     val dur: String,
     val hasAudio: Boolean,
     val hasPdf: Boolean,
+    val hasVideo: Boolean = false,
     val audioUrl: String,
     val pdfUrl: String,
+    val videoUrl: String = "",
     val read: Boolean,
     val pct: Double,
     val pos: Double
@@ -71,6 +73,7 @@ data class LessonDetail(
     val coverUrl: String,
     val audioUrl: String,
     val pdfUrl: String,
+    val videoUrl: String = "",
     val bodyHtml: String,
     val prev: NavRef?,
     val next: NavRef?

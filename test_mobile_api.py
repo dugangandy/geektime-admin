@@ -109,11 +109,13 @@ class MobileApiCase(unittest.TestCase):
         ]))
         put("Course A/00-audio.mp3", b"\x00" * 5000)
         put("Course A/00-doc.pdf", b"%PDF-1.4" + b"\x00" * 3000)
+        put("Course A/00-video.mp4", b"\x00" * 4096)
         common = {"total": 3, "kind": "kind-simple", "course": "Course A",
                   "meta": "", "sub": ""}
         put("Course A/reader/pages/000.html", _lesson_page(dict(common, **{
             "idx": 0, "title": "00 | 进程与线程", "cover": "",
             "duration": "10:00", "audio": "../../00-audio.mp3",
+            "video": "../../00-video.mp4",
             "pdf": "../../00-doc.pdf", "body": "<p>hello 并发</p>",
         })))
         # 巨型 base64 封面：audio/pdf 键被推到 8KB 之后
@@ -299,6 +301,9 @@ class MobileApiCase(unittest.TestCase):
         # 详情页直接带可播地址，客户端据此一次构建播放队列
         self.assertEqual(items[0]["audio_url"], "/Course%20A/00-audio.mp3")
         self.assertEqual(items[0]["pdf_url"], "/Course%20A/00-doc.pdf")
+        self.assertTrue(items[0]["has_video"])
+        self.assertEqual(items[0]["video_url"], "/Course%20A/00-video.mp4")
+        self.assertFalse(items[1]["has_video"])
         self.assertEqual(items[2]["audio_url"], "")      # ../ 越界必须被拒绝
         self.assertEqual(payload["total"], 3)
 
@@ -318,6 +323,7 @@ class MobileApiCase(unittest.TestCase):
         self.assertEqual(payload["idx"], 0)
         self.assertEqual(payload["audio_url"], "/Course%20A/00-audio.mp3")
         self.assertEqual(payload["pdf_url"], "/Course%20A/00-doc.pdf")
+        self.assertEqual(payload["video_url"], "/Course%20A/00-video.mp4")
         self.assertIn("hello", payload["body_html"])
         self.assertIsNone(payload["prev"])
         self.assertEqual(payload["next"]["idx"], 1)
@@ -577,6 +583,62 @@ class RealCourseDataCase(unittest.TestCase):
         self.assertEqual(self.api._resolve_media(course, data["audio"]), "")
         pdf = self.api._resolve_media(course, data["pdf"])
         self.assertTrue(pdf.startswith("/%E5%B7%A6%E8%80%B3%E5%90%AC%E9%A3%8E/"))
+
+
+class IndexUnionCase(unittest.TestCase):
+    """清单 ∪ 本地目录：本地新增的课程（未进 115 门清单）也要出现在 App 里。"""
+
+    def test_local_only_course_is_listed(self):
+        import mobile_api
+
+        root = tempfile.mkdtemp(prefix="gk-union-")
+        try:
+            os.makedirs(os.path.join(root, "template", "nav"))
+            with open(os.path.join(root, "template", "nav", "course_manifest.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "courses": [
+                    {"name": "清单课程", "dir": "backend", "author": "A", "lessons": 1},
+                ]}, f, ensure_ascii=False)
+            for name, author in (("清单课程", "A"), ("算法面试通关40讲", "王老师")):
+                d = os.path.join(root, name, "reader", "data")
+                os.makedirs(d)
+                with open(os.path.join(d, "catalog.js"), "w", encoding="utf-8") as f:
+                    f.write('window.COURSE = ' + json.dumps(
+                        {"title": name, "author": author, "total": 3, "chapters": []},
+                        ensure_ascii=False) + ";")
+            os.makedirs(os.path.join(root, "空课程"))          # 没有 reader，不算
+
+            index = mobile_api.CourseIndex(root, data_dir=root)
+            names = sorted(c["name"] for c in index.courses())
+            self.assertEqual(names, sorted(["清单课程", "算法面试通关40讲"]))
+
+            extra = [c for c in index.courses() if c["name"] == "算法面试通关40讲"][0]
+            self.assertEqual(extra["author"], "王老师")        # 从 catalog.js 取作者
+            self.assertEqual(extra["category"], "cs")          # 算法/面试 → 计算机基础
+            self.assertEqual(extra["category_label"], "计算机基础")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_new_reader_dir_shows_up_without_restart(self):
+        import mobile_api
+
+        root = tempfile.mkdtemp(prefix="gk-union2-")
+        try:
+            os.makedirs(os.path.join(root, "template", "nav"))
+            with open(os.path.join(root, "template", "nav", "course_manifest.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "courses": []}, f)
+            index = mobile_api.CourseIndex(root, data_dir=root)
+            self.assertEqual(index.courses(), [])
+
+            # 构建完 reader 后，无需重启服务，下一次请求就能看到
+            d = os.path.join(root, "新课程", "reader", "data")
+            os.makedirs(d)
+            with open(os.path.join(d, "catalog.js"), "w", encoding="utf-8") as f:
+                f.write('window.COURSE = {"title":"新课程","author":"","total":1,"chapters":[]};')
+            self.assertEqual([c["name"] for c in index.courses()], ["新课程"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

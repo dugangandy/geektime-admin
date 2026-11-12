@@ -50,6 +50,12 @@ LESSON_RE = re.compile(
     r'<script type="application/json" id="lesson-data">(.*?)</script>', re.S)
 AUDIO_KEY_RE = re.compile(rb'"audio":"([^"\\]*)"')
 PDF_KEY_RE = re.compile(rb'"pdf":"([^"\\]*)"')
+VIDEO_KEY_RE = re.compile(rb'"video":"([^"\\]*)"')
+
+# 本地新增课程（还没进 115 门清单）也要能在 App 里看到，分类规则复用首页生成器，
+# 避免 API 与首页各维护一份关键词表。导入失败时退回空分类，不影响其它功能。
+_NAV_MODULE = None
+_NAV_STOP = object()
 
 CATEGORY_LABELS = {
     "ai": "人工智能",
@@ -63,6 +69,49 @@ CATEGORY_LABELS = {
     "growth": "产品/增长",
     "life": "多元成长",
 }
+
+
+def _nav_module():
+    """延迟加载首页生成器：分类关键词表只维护那一份。"""
+    global _NAV_MODULE
+    if _NAV_MODULE is not None:
+        return None if _NAV_MODULE is _NAV_STOP else _NAV_MODULE
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "template", "nav", "build_catalog.py")
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gk_nav_catalog", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:                       # noqa: BLE001
+        _NAV_MODULE = _NAV_STOP
+        return None
+    _NAV_MODULE = mod
+    return mod
+
+
+def _local_category(name):
+    """清单外课程的方向 key（与首页同一套规则）。取不到时返回空串。"""
+    mod = _nav_module()
+    if mod is None:
+        return ""
+    try:
+        cat, _mapped = mod.resolve_category(name)
+        key = mod.resolve_direction(name, cat)
+    except Exception:                       # noqa: BLE001
+        return ""
+    return key if key in CATEGORY_LABELS else ""
+
+
+def _catalog_author(path):
+    """从 catalog.js 头部取作者，不为一个字段解析整份目录。"""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            head = f.read(4096)
+    except OSError:
+        return ""
+    m = re.search(r'"author"\s*:\s*"([^"]*)"', head)
+    return m.group(1).strip() if m else ""
 
 
 class APIError(Exception):
@@ -156,25 +205,35 @@ class CourseIndex:
         self.manifest_path = manifest_path or os.path.join(
             self.root, "template", "nav", "course_manifest.json")
         self._lock = threading.RLock()
-        self._manifest_mtime = None
+        self._stamp = None
         self._courses = []
         self._by_id = {}
         self._catalog = {}
         self.ensure()
 
-    def ensure(self):
+    @staticmethod
+    def _mtime(path):
         try:
-            mtime = os.stat(self.manifest_path).st_mtime
+            return os.stat(path).st_mtime
         except OSError:
-            mtime = 0.0
-        if self._manifest_mtime == mtime and self._courses:
+            return 0.0
+
+    def ensure(self):
+        """清单或课程目录有变化才重扫。
+
+        课程列表是「清单 ∪ 本地目录」，本地新建课程、刚生成 reader 都要能马上
+        出现在 App 里：新建/删除课程会改数据目录 mtime，冒出来的 reader/ 子目录
+        会改课程目录 mtime，所以两者都进指纹。
+        """
+        stamp = (self._mtime(self.manifest_path), self._mtime(self.data_dir))
+        if self._stamp == stamp and self._courses:
             return
         with self._lock:
-            if self._manifest_mtime == mtime and self._courses:
+            if self._stamp == stamp and self._courses:
                 return
-            self._reload(mtime)
+            self._reload(stamp)
 
-    def _reload(self, mtime):
+    def _reload(self, stamp):
         try:
             with open(self.manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -220,11 +279,53 @@ class CourseIndex:
             }
             courses.append(course)
             by_id[cid] = course
+        # 清单之外、但磁盘上已经有 reader 的课程（本地新增）：与首页口径一致，一并收录
+        for extra in self._extra_courses(seen):
+            courses.append(extra)
+            by_id[extra["id"]] = extra
         with self._lock:
             self._courses = courses
             self._by_id = by_id
             self._catalog.clear()
-            self._manifest_mtime = mtime
+            self._stamp = stamp
+
+    def _extra_courses(self, seen):
+        """数据目录里不在清单、但已经有 reader 的课程（本地新增）。"""
+        out = []
+        try:
+            names = sorted(os.listdir(self.data_dir))
+        except OSError:
+            return out
+        for name in names:
+            if name.startswith(("_", ".")) or name.endswith("_old") \
+                    or name in ("assets", "template"):
+                continue
+            course_dir = os.path.join(self.data_dir, name)
+            catalog_path = os.path.join(course_dir, "reader", "data", "catalog.js")
+            if not os.path.isdir(course_dir) or not os.path.isfile(catalog_path):
+                continue
+            cid = hashlib.sha1(name.encode("utf-8")).hexdigest()[:12]
+            if cid in seen:
+                continue
+            seen.add(cid)
+            cover = self._cover_file(name + ".webp", name)
+            category = _local_category(name)
+            out.append({
+                "id": cid,
+                "name": name,
+                "path": course_dir,
+                "category": category,
+                "category_label": CATEGORY_LABELS.get(category, category or "其他"),
+                "cover_url": ("/assets/covers/" + urllib.parse.quote(cover, safe="")
+                              if cover else ""),
+                "badge": "",
+                "author": _catalog_author(catalog_path),
+                "identity": "",
+                "learners": "",
+                "manifest_lessons": 0,
+                "catalog_path": catalog_path,
+            })
+        return out
 
     def _cover_file(self, cover, name):
         if not cover:
@@ -701,8 +802,10 @@ class MobileAPI:
                     "dur": item["dur"],
                     "has_audio": bool(media["audio_url"]),
                     "has_pdf": bool(media["pdf_url"]),
+                    "has_video": bool(media["video_url"]),
                     "audio_url": media["audio_url"],
                     "pdf_url": media["pdf_url"],
+                    "video_url": media["video_url"],
                     "read": bool(rec.get("read")),
                     "pct": round(float(rec.get("pct") or 0), 1),
                     "pos": round(float(rec.get("pos") or 0), 1),
@@ -738,7 +841,7 @@ class MobileAPI:
         try:
             mtime = os.stat(path).st_mtime
         except OSError:
-            return {"audio_url": "", "pdf_url": ""}
+            return {"audio_url": "", "pdf_url": "", "video_url": ""}
         key = (path, mtime)
         with self._lesson_lock:
             cached = self._media_cache.get(key)
@@ -746,21 +849,22 @@ class MobileAPI:
             return cached
         # 个别页面的「封面」是 base64 内联图，会把 audio/pdf 键推到 800KB 之后，
         # 所以用 mmap 全页扫描（由 OS 按页换入，不复制整文件）而不是只读前 4KB。
-        rel = {"audio": b"", "pdf": b""}
+        rel = {"audio": b"", "pdf": b"", "video": b""}
         try:
             with open(path, "rb") as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    audio = AUDIO_KEY_RE.search(mm)
-                    pdf = PDF_KEY_RE.search(mm)
-                    if audio:
-                        rel["audio"] = audio.group(1)
-                    if pdf:
-                        rel["pdf"] = pdf.group(1)
+                    for key, pattern in (("audio", AUDIO_KEY_RE),
+                                         ("pdf", PDF_KEY_RE),
+                                         ("video", VIDEO_KEY_RE)):
+                        hit = pattern.search(mm)
+                        if hit:
+                            rel[key] = hit.group(1)
         except (OSError, ValueError):
             pass
         result = {
             "audio_url": self._resolve_media(course, rel["audio"].decode("utf-8", "replace")),
             "pdf_url": self._resolve_media(course, rel["pdf"].decode("utf-8", "replace")),
+            "video_url": self._resolve_media(course, rel["video"].decode("utf-8", "replace")),
         }
         with self._lesson_lock:
             if len(self._media_cache) > 4000:
@@ -800,6 +904,7 @@ class MobileAPI:
             "cover_url": course["cover_url"],
             "audio_url": media["audio_url"],
             "pdf_url": media["pdf_url"],
+            "video_url": media["video_url"],
             "body_html": data.get("body") or "",
             "body_bytes": len((data.get("body") or "").encode("utf-8")),
             "prev": ({"idx": prev_row["idx"], "title": prev_row["label"]}
