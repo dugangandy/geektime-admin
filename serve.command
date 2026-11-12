@@ -38,7 +38,7 @@ SSHOPT=(-o BatchMode=yes -o ConnectTimeout=8)
 
 # 课程数据目录（只放各门课程的一级子目录）。留空 = 与脚本同目录。
 # 直接改下一行的默认值，或运行时：GK_DATA_DIR="/Volumes/USB/课程" ./serve.command
-COURSE_DIR="${GK_DATA_DIR:-}"
+COURSE_DIR="/Volumes/Macintosh HD/Users/极客时间"
 if [ -n "$COURSE_DIR" ] && [ ! -d "$COURSE_DIR" ]; then
   echo "  [ERROR] course data folder not found: $COURSE_DIR"
   read -r -p "Press Enter to close..."

@@ -10,5 +10,6 @@
     <color name="line">#ECEDEF</color>
     <color name="green">#17A673</color>
     <color name="red">#E5484D</color>
+    <color name="tag_video">#2F5BD7</color>
     <color name="scrim">#99000000</color>
 </resources>

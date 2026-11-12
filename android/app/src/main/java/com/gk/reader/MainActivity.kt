@@ -447,14 +447,22 @@ class MainActivity : AppCompatActivity() {
     private fun buildChips() {
         val data = payload ?: return
         chipsRow.removeAllViews()
-        chipsRow.addView(chip("全部", filter.category.isEmpty()) {
-            filter = filter.copy(category = "")
+        chipsRow.addView(chip("全部", filter.category.isEmpty() && !filter.videoOnly) {
+            filter = filter.copy(category = "", videoOnly = false)
             buildChips()
             renderCourses()
         })
         for (category in data.categories) {
             chipsRow.addView(chip(category.label, filter.category == category.key) {
                 filter = filter.copy(category = category.key)
+                buildChips()
+                renderCourses()
+            })
+        }
+        val videoCount = data.courses.count { it.videoCourse }
+        if (videoCount > 0) {
+            chipsRow.addView(chip("视频课（$videoCount）", filter.videoOnly) {
+                filter = filter.copy(videoOnly = !filter.videoOnly)
                 buildChips()
                 renderCourses()
             })
@@ -473,7 +481,12 @@ class MainActivity : AppCompatActivity() {
         val data = payload ?: return
         val list = Filters.apply(data.courses, filter)
         adapter.submit(list)
-        listTitle.text = "${if (filter.category.isEmpty()) "全部课程" else data.categories.firstOrNull { it.key == filter.category }?.label ?: "课程"} · ${list.size} 门"
+        val scope = when {
+            filter.videoOnly -> "视频课"
+            filter.category.isEmpty() -> "全部课程"
+            else -> data.categories.firstOrNull { it.key == filter.category }?.label ?: "课程"
+        }
+        listTitle.text = "$scope · ${list.size} 门"
         renderContinue(data.courses)
         if (list.isEmpty()) {
             showEmpty("没有符合条件的课程", "查看全部") {
@@ -605,6 +618,14 @@ class MainActivity : AppCompatActivity() {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 }
                 col.addView(Ui.text(this, course.name, 15f, c(R.color.text), true, 2))
+                if (course.videoCourse) {
+                    col.addView(Ui.videoTag(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = dp(3) }
+                    })
+                }
                 col.addView(Ui.text(this, course.author, 12f, c(R.color.text_dim), false, 1).apply {
                     setPadding(0, dp(3), 0, 0)
                 })

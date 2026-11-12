@@ -100,6 +100,41 @@ class CollectCase(unittest.TestCase):
         self.assertIn('data-status="pending"', online)
         self.assertIn("启动服务后可生成", offline)
 
+    def test_count_media_skips_product_dirs(self):
+        c = self.root / "媒体课"
+        write(c / "01.mp3", b"ID3")
+        write(c / "02.pdf", b"%PDF")
+        write(c / "03.mp4", b"mp4")
+        write(c / "reader" / "ignored.mp3", b"ID3")
+        write(c / "mp4-opt" / "ignored.mp4", b"mp4")
+        self.assertEqual(self.catalog.count_media(c), (1, 1, 1))
+
+    def test_is_video_course_rule(self):
+        f = self.catalog.is_video_course
+        self.assertTrue(f({"videos": 35, "lessons": 35, "audios": 0}))
+        self.assertTrue(f({"videos": 27, "lessons": 29, "audios": 25}))  # 27>14.5, 25<27
+        self.assertTrue(f({"videos": 20, "chapters": 30, "audios": 0}))  # 讲数取 chapters
+        self.assertFalse(f({"videos": 4, "lessons": 49, "audios": 47}))   # 混合课
+        self.assertFalse(f({"videos": 10, "lessons": 30, "audios": 12}))  # 10<=15
+        self.assertFalse(f({"videos": 30, "lessons": 30, "audios": 30}))  # 音频不比视频少
+        self.assertFalse(f({"videos": 0, "lessons": 30, "audios": 20}))
+
+    def test_video_course_tag_and_filter_chip(self):
+        write(self.root / "视频课" / "01.mp4", b"mp4")
+        html = self.catalog.render_index(self.collect(), "标题", "#f66121")
+        self.assertIn('data-status="video"', html)       # 筛选 chip
+        self.assertIn('data-video="1"', html)            # 卡片标记
+        self.assertIn('class="tag-video">视频课', html)   # pill
+        self.assertIn('视频课 <span>1</span>', html)      # chip 计数
+
+    def test_non_video_card_has_no_tag(self):
+        card = self.catalog.card_html({
+            "name": "混合课", "state": "reader", "href": "x",
+            "videos": 4, "lessons": 49, "audios": 47,
+        })
+        self.assertNotIn("tag-video", card)
+        self.assertNotIn("data-video", card)
+
     def test_static_copy_atomic_and_guarded(self):
         html = self.catalog.render_index(self.collect(), "标题")
         dst = self.catalog.write_static_index(self.root, html, "index.html")
@@ -145,6 +180,121 @@ class BuildQueueCase(unittest.TestCase):
         # 空课程目录必然构建失败，但状态机必须收敛而不是卡在 building
         self.assertIn(self.queue.status("课程A")["state"], ("ready", "failed"))
         self.assertNotEqual(self.queue.status("课程A")["state"], "building")
+
+
+class SiteGeneratorCase(unittest.TestCase):
+    """首页缓存失效：数据目录里的「内容变化」必须让 courses() 重新扫描。
+
+    旧签名只看一级目录名 + 清单/catalog.html/course.json 的 mtime，往已有课程
+    目录补正文、命令行外部构建 reader、补封面都读不到，卡片会一直停在旧状态。
+    """
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="gk-site-"))
+        nav = self.root / "template" / "nav"
+        nav.mkdir(parents=True)
+        for name in ("build_catalog.py", "catalog_template.html"):
+            shutil.copy2(HERE / "template" / "nav" / name, nav / name)
+        self.manifest = nav / "course_manifest.json"
+        write(self.manifest, json.dumps({"version": 1, "courses": []}))
+        self.site = site_generator.SiteGenerator(self.root, self.manifest)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def course(self, name):
+        return {c["name"]: c for c in self.site.courses()}[name]
+
+    def test_unchanged_tree_reuses_cache(self):
+        write(self.root / "稳定课" / "html" / "01.html", _PAGE)
+        self.site.courses()
+        cached = self.site._courses
+        self.site.courses()
+        self.assertIs(self.site._courses, cached, "未变化时应命中缓存")
+
+    def test_new_course_dir_is_picked_up(self):
+        self.assertNotIn("新课", {c["name"] for c in self.site.courses()})
+        write(self.root / "新课" / "html" / "01.html", _PAGE)
+        self.assertEqual(self.course("新课")["state"], "pending")
+
+    def test_content_added_to_existing_subdir_invalidates(self):
+        # html/ 事先存在：只往里补文件，课程目录自身 mtime 不变
+        (self.root / "空课" / "html").mkdir(parents=True)
+        self.assertEqual(self.course("空课")["state"], "none")
+        write(self.root / "空课" / "html" / "01.html", _PAGE)
+        self.assertEqual(self.course("空课")["state"], "pending")
+
+    def test_media_added_to_existing_subdir_invalidates(self):
+        write(self.root / "附课" / "html" / "01.html", _PAGE)
+        (self.root / "附课" / "音频").mkdir()
+        self.assertEqual(self.course("附课")["audios"], 0)
+        write(self.root / "附课" / "音频" / "01.mp3", b"ID3")
+        self.assertEqual(self.course("附课")["audios"], 1)
+
+    def test_reader_built_externally_invalidates(self):
+        # 不经过 BuildQueue（无 on_done 回调）也要生效
+        write(self.root / "构建课" / "html" / "01.html", _PAGE)
+        (self.root / "构建课" / "reader").mkdir()
+        self.assertEqual(self.course("构建课")["state"], "pending")
+        write(self.root / "构建课" / "reader" / "index.html", "<html></html>")
+        self.assertEqual(self.course("构建课")["state"], "reader")
+
+    def test_reader_catalog_js_change_invalidates(self):
+        write(self.root / "讲数课" / "reader" / "index.html", "<html></html>")
+        js = self.root / "讲数课" / "reader" / "data" / "catalog.js"
+        write(js, 'window.COURSE = {"total": 1};')
+        self.assertEqual(self.course("讲数课")["chapters"], 1)
+        write(js, 'window.COURSE = {"total": 9, "author": "张三"};')
+        self.assertEqual(self.course("讲数课")["chapters"], 9)
+
+    def test_cover_added_invalidates(self):
+        # 封面在 root/assets/covers，课程目录外置：补封面不能靠「root 多了一级
+        # 目录」被旧签名误打误撞发现，必须靠封面目录自身的指纹。
+        data_dir = self.root / "课程数据"
+        (data_dir / "封面课").mkdir(parents=True)
+        write(self.manifest, json.dumps({"version": 1, "courses": [
+            {"name": "封面课", "cover": "封面课.webp"}]}, ensure_ascii=False))
+        site = site_generator.SiteGenerator(self.root, self.manifest,
+                                           data_dir=data_dir)
+
+        def course():
+            return {c["name"]: c for c in site.courses()}["封面课"]
+
+        self.assertEqual(course()["cover_file"], "")
+        write(self.root / "assets" / "covers" / "封面课.webp", b"RIFF____WEBP")
+        self.assertEqual(course()["cover_file"], "封面课.webp")
+
+    def test_course_json_change_still_invalidates(self):
+        write(self.root / "元数据课" / "html" / "01.html", _PAGE)
+        self.assertEqual(self.course("元数据课")["author"], "")
+        write(self.root / "元数据课" / "course.json",
+              json.dumps({"author": "手工作者"}, ensure_ascii=False))
+        self.assertEqual(self.course("元数据课")["author"], "手工作者")
+
+    def test_build_states_do_not_bypass_cache(self):
+        write(self.root / "缓存课" / "html" / "01.html", _PAGE)
+        self.site.courses()
+        cached = self.site._courses
+        states = {"缓存课": "building"}
+        out = {c["name"]: c["state"] for c in self.site.courses(states)}
+        self.assertIs(self.site._courses, cached, "叠加状态不应触发全量重扫")
+        self.assertEqual(out["缓存课"], "building")
+        # 叠加是视图，不能污染缓存里的基础数据
+        self.assertEqual([c["state"] for c in cached if c["name"] == "缓存课"],
+                         ["pending"])
+        self.assertEqual(self.course("缓存课")["state"], "pending")
+
+    def test_reader_state_not_overridden_by_build_state(self):
+        write(self.root / "已生成" / "reader" / "index.html", "<html></html>")
+        out = {c["name"]: c["state"]
+               for c in self.site.courses({"已生成": "failed"})}
+        self.assertEqual(out["已生成"], "reader")
+
+    def test_manifest_only_course_can_show_build_state(self):
+        write(self.manifest, json.dumps({"version": 1, "courses": [
+            {"name": "清单占位", "dir": "sec"}]}, ensure_ascii=False))
+        out = {c["name"]: c["state"]
+               for c in self.site.courses({"清单占位": "building"})}
+        self.assertEqual(out["清单占位"], "building")
 
 
 if __name__ == "__main__":

@@ -260,7 +260,8 @@ class Api(context: Context, val prefs: Prefs) {
             read = json.optInt("read"),
             pct = json.optInt("pct"),
             chapters = chapters,
-            last = parseLast(json.optJSONObject("last"))
+            last = parseLast(json.optJSONObject("last")),
+            videoCourse = json.optBoolean("video_course")
         )
     }
 
@@ -442,7 +443,8 @@ class Api(context: Context, val prefs: Prefs) {
         read = o.optInt("read"),
         pct = o.optInt("pct"),
         started = o.optBoolean("started"),
-        last = parseLast(o.optJSONObject("last"))
+        last = parseLast(o.optJSONObject("last")),
+        videoCourse = o.optBoolean("video_course")
     )
 
     private fun parseLast(o: JSONObject?): LastLesson? {

@@ -273,6 +273,7 @@ class MobileApiCase(unittest.TestCase):
         self.assertEqual(row["total"], 3)
         self.assertEqual(row["read"], 0)
         self.assertFalse(row["started"])
+        self.assertFalse(row["video_course"])     # 1 视频 / 3 讲 / 1 音频，不算视频课
         self.assertIsNone(row["last"])
         self.assertEqual(row["cover_url"], "/assets/covers/Course%20A.webp")
         self.assertEqual(payload["categories"],
@@ -306,6 +307,7 @@ class MobileApiCase(unittest.TestCase):
         self.assertFalse(items[1]["has_video"])
         self.assertEqual(items[2]["audio_url"], "")      # ../ 越界必须被拒绝
         self.assertEqual(payload["total"], 3)
+        self.assertFalse(payload["video_course"])        # 1 视频 / 3 讲 / 1 音频，不算视频课
 
     def test_course_detail_unknown_id(self):
         self.login()
@@ -616,6 +618,46 @@ class IndexUnionCase(unittest.TestCase):
             self.assertEqual(extra["author"], "王老师")        # 从 catalog.js 取作者
             self.assertEqual(extra["category"], "cs")          # 算法/面试 → 计算机基础
             self.assertEqual(extra["category_label"], "计算机基础")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_video_course_flag_matches_homepage_rule(self):
+        import mobile_api
+
+        root = tempfile.mkdtemp(prefix="gk-video-")
+        try:
+            os.makedirs(os.path.join(root, "template", "nav"))
+            with open(os.path.join(root, "template", "nav", "course_manifest.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "courses": [
+                    {"name": "纯视频课", "dir": "backend", "lessons": 4},
+                    {"name": "混合课", "dir": "backend", "lessons": 40},
+                ]}, f, ensure_ascii=False)
+            for name, total, videos, audios in (
+                    ("纯视频课", 4, 4, 0), ("混合课", 40, 2, 40)):
+                d = os.path.join(root, name, "reader", "data")
+                os.makedirs(d)
+                with open(os.path.join(d, "catalog.js"), "w", encoding="utf-8") as f:
+                    f.write("window.COURSE = " + json.dumps(
+                        {"title": name, "author": "", "total": total,
+                         "chapters": []}, ensure_ascii=False) + ";")
+                for i in range(videos):
+                    with open(os.path.join(root, name, "v%02d.mp4" % i), "wb") as f:
+                        f.write(b"mp4")
+                for i in range(audios):
+                    with open(os.path.join(root, name, "a%02d.mp3" % i), "wb") as f:
+                        f.write(b"mp3")
+
+            index = mobile_api.CourseIndex(root, data_dir=root)
+            flags = {c["name"]: c["video_course"] for c in index.courses()}
+            self.assertTrue(flags["纯视频课"])     # 4 视频 / 4 讲 / 0 音频
+            self.assertFalse(flags["混合课"])      # 2 视频 / 40 讲 / 40 音频
+
+            # 搜索关键字与首页一致：输入「视频课」能命中
+            self.assertIn("视频课", mobile_api.MobileAPI._search_text(
+                {"name": "x", "author": "y", "video_course": True}))
+            self.assertNotIn("视频课", mobile_api.MobileAPI._search_text(
+                {"name": "x", "author": "y", "video_course": False}))
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

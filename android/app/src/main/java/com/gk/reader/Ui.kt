@@ -167,6 +167,13 @@ object Ui {
             background = roundBg(ctx, Color.TRANSPARENT, 4f, ctx.c(R.color.orange), 1f)
         }
 
+    /** 视频课标签：蓝色描边，与官网角标（橙色）区分。 */
+    fun videoTag(ctx: Context): TextView =
+        text(ctx, "视频课", 10f, ctx.c(R.color.tag_video), true).apply {
+            setPadding(ctx.dp(6), ctx.dp(2), ctx.dp(6), ctx.dp(2))
+            background = roundBg(ctx, Color.TRANSPARENT, 4f, ctx.c(R.color.tag_video), 1f)
+        }
+
     fun spacer(ctx: Context): View = View(ctx).apply {
         layoutParams = LinearLayout.LayoutParams(1, 1).apply { weight = 1f }
     }

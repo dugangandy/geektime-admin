@@ -3,8 +3,8 @@
 
 serve.py 只负责路由与鉴权，数据、缓存、构建都放在这里：
 
-- ``SiteGenerator``：把本地课程子目录与 115 门清单合并成首页数据，按 mtime 缓存，
-  并在缓存失效时节流落盘一份静态 index.html 供 ``file://`` 双击使用。
+- ``SiteGenerator``：把本地课程子目录与 115 门清单合并成首页数据，按目录树指纹
+  缓存，并在缓存失效时节流落盘一份静态 index.html 供 ``file://`` 双击使用。
 - ``BuildQueue``：首次点击「待生成」课程时后台构建该门 reader；单锁串行、幂等去重、
   失败可重试、超时可控，构建完成后回调让首页缓存失效。
 """
@@ -12,6 +12,7 @@ serve.py 只负责路由与鉴权，数据、缓存、构建都放在这里：
 import importlib.util
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -66,33 +67,96 @@ class SiteGenerator:
         self._last_static = 0.0
 
     # ---------------------------------------------------------------- 数据
-    def _signature(self):
+    @staticmethod
+    def _stamp(path):
+        """路径指纹 (mtime_ns, size)；不存在的路径统一为 (0, 0)。
+
+        带上 size 是为了在时间戳粒度较粗的文件系统上，仍能发现「同一秒覆写
+        但长度变化」的文件（例如 reader/data/catalog.js 改讲数）。
+        """
         try:
-            names = tuple(sorted(p.name for p in self.data_dir.iterdir() if p.is_dir()))
+            st = os.stat(path)
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return (0, 0)
+
+    def _dir_stamps(self, path):
+        """一层子目录的 (名字, 指纹)；os.scandir 用 d_type 判断类型，避免
+        对每个条目再 stat 一次（Path.is_dir() 会，2 万文件下差别是数量级的）。"""
+        out = []
+        try:
+            with os.scandir(path) as it:
+                for e in it:
+                    if e.is_dir():
+                        out.append((e.name, self._stamp(e.path)))
+        except OSError:
+            return ()
+        out.sort()
+        return tuple(out)
+
+    def _course_stamp(self, course_dir):
+        """单门课的内容指纹：只 stat 目录与一层子目录，不递归遍历文件。
+
+        正文/附件通常放在 html/、mp3/、章节目录、reader/ 等一级子目录里，往
+        这些目录增删文件只改子目录的 mtime，课程目录自身的 mtime 不变，所以
+        必须逐个记录。reader/data/catalog.js 在二级子目录里且决定讲数与作者，
+        单独作为哨兵文件；index.html / reader/index.html 决定卡片状态。
+        """
+        parts = [self._stamp(course_dir), self._dir_stamps(course_dir)]
+        for rel in ("index.html", "course.json",
+                    "reader/index.html", "reader/data/catalog.js"):
+            parts.append(self._stamp(course_dir / rel))
+        return tuple(parts)
+
+    def _signature(self):
+        """首页缓存键：覆盖所有会改变卡片渲染的本地输入。
+
+        除了清单/官网存档/course.json，还必须感知课程目录里正文、附件、reader
+        与封面的增删；否则往已有课程目录补文件、用命令行外部构建 reader、或补
+        一张封面后，首页会一直返回旧卡片。这里只做 stat 与一层 scandir，递归
+        扫描仍由 collect_courses 负责，保证每次首页请求都算得起。
+        """
+        try:
+            with os.scandir(self.data_dir) as it:
+                names = tuple(sorted(e.name for e in it if e.is_dir()))
         except OSError:
             names = ()
-        stamps = []
-        for f in (self.manifest_path, self.root / "catalog.html"):
-            try:
-                stamps.append(f.stat().st_mtime_ns)
-            except OSError:
-                stamps.append(0)
-        metas = []
-        for n in names:
-            try:
-                metas.append((self.data_dir / n / "course.json").stat().st_mtime_ns)
-            except OSError:
-                metas.append(0)
-        return names, tuple(stamps), tuple(metas)
+        stamps = tuple(self._stamp(f) for f in (
+            self.manifest_path,
+            self.root / "catalog.html",
+            self.root / "assets" / "covers",
+        ))
+        metas = tuple(self._course_stamp(self.data_dir / n) for n in names)
+        return names, stamps, metas
 
     def courses(self, build_states=None):
-        """课程记录；带 build_states（构建中/失败）时跳过缓存，保证状态实时。"""
+        """课程记录；构建中/失败状态按请求叠加，不破坏底层数据的签名缓存。
+
+        build_states 只是瞬时视图。早期实现把它当作「缓存绕过」信号，而
+        BuildQueue.states() 会永久保留历史 ready/failed 记录，于是任意一次
+        构建之后每次首页请求都会全量重扫（128 门课约 3 秒）。现在基础数据
+        只按 _signature() 失效，状态在返回时叠加即可。
+        """
+        base = self._base_courses()
+        if not build_states:
+            return base
+        out = []
+        for c in base:
+            st = build_states.get(c["name"])
+            # 已有 reader 永远优先直接打开，与 collect_courses 的判定一致
+            if st in ("building", "failed") and c["state"] != "reader":
+                c = dict(c)
+                c["state"] = st
+            out.append(c)
+        return out
+
+    def _base_courses(self):
         key = self._signature()
         with self._lock:
-            if not build_states and key == self._key:
+            if key == self._key:
                 return list(self._courses)
         data = self.catalog.collect_courses(
-            self.root, self.manifest_path, "html", build_states,
+            self.root, self.manifest_path, "html", None,
             course_root=self.data_dir)
         with self._lock:
             self._key, self._courses = key, data

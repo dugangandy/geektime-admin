@@ -13,7 +13,8 @@ import java.util.Locale
 data class FilterState(
     val category: String = "",
     val sort: Int = 0,        // 0 最近学习 1 名称 2 讲数
-    val progress: Int = 0     // 0 全部 1 未开始 2 进行中 3 已学完
+    val progress: Int = 0,    // 0 全部 1 未开始 2 进行中 3 已学完
+    val videoOnly: Boolean = false
 )
 
 object Filters {
@@ -22,6 +23,7 @@ object Filters {
     fun apply(courses: List<CourseSummary>, f: FilterState): List<CourseSummary> {
         var list = if (f.category.isEmpty()) courses
         else courses.filter { it.category == f.category }
+        if (f.videoOnly) list = list.filter { it.videoCourse }
         list = when (f.progress) {
             1 -> list.filter { !it.started }
             2 -> list.filter { it.started && it.pct < 100 }

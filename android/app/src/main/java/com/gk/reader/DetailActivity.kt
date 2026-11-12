@@ -190,13 +190,22 @@ class DetailActivity : AppCompatActivity() {
             setPadding(dp(14), dp(2), 0, 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+        val tagsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(4) }
+        }
         if (data.badge.isNotEmpty()) {
-            col.addView(Ui.tag(this, data.badge).apply {
+            tagsRow.addView(Ui.tag(this, data.badge).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = dp(4) }
+                ).apply { marginEnd = dp(4) }
             })
         }
+        if (data.videoCourse) tagsRow.addView(Ui.videoTag(this))
+        if (tagsRow.childCount > 0) col.addView(tagsRow)
         col.addView(Ui.text(this, data.name, 21f, c(R.color.text), true, 2))
         val byline = listOf(data.author, data.identity).filter { it.isNotBlank() }.joinToString(" · ")
         if (byline.isNotEmpty()) {

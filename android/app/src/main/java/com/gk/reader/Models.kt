@@ -18,7 +18,8 @@ data class CourseSummary(
     val read: Int,
     val pct: Int,
     val started: Boolean,
-    val last: LastLesson?
+    val last: LastLesson?,
+    val videoCourse: Boolean = false
 )
 
 data class CoursesPayload(val categories: List<Category>, val courses: List<CourseSummary>)
@@ -53,7 +54,8 @@ data class CourseDetail(
     val read: Int,
     val pct: Int,
     val chapters: List<Chapter>,
-    val last: LastLesson?
+    val last: LastLesson?,
+    val videoCourse: Boolean = false
 ) {
     val lessons: List<LessonItem> get() = chapters.flatMap { it.items }
 }

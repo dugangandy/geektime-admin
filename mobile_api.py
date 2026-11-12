@@ -114,6 +114,33 @@ def _catalog_author(path):
     return m.group(1).strip() if m else ""
 
 
+def _catalog_total(path):
+    """从 catalog.js 头部取总讲数，供「视频课」判定用。"""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            head = f.read(4096)
+    except OSError:
+        return 0
+    m = re.search(r'"total"\s*:\s*(\d+)', head)
+    return int(m.group(1)) if m else 0
+
+
+def _video_course_flag(mod, course_dir, catalog_path):
+    """复用首页的 count_media / is_video_course，判定规则只维护一份。
+
+    首页生成器加载失败（例如精简部署）时一律返回 False，不影响其它接口。
+    """
+    if mod is None:
+        return False
+    try:
+        audios, _pdfs, videos = mod.count_media(course_dir)
+        total = _catalog_total(catalog_path)
+        return bool(mod.is_video_course(
+            {"videos": videos, "audios": audios, "lessons": total}))
+    except Exception:                       # noqa: BLE001
+        return False
+
+
 class APIError(Exception):
     def __init__(self, status, code, message):
         super().__init__(message)
@@ -283,6 +310,11 @@ class CourseIndex:
         for extra in self._extra_courses(seen):
             courses.append(extra)
             by_id[extra["id"]] = extra
+        # 只在重扫时算一次：count_media 要遍历课程目录，不能放进每个请求
+        nav = _nav_module()
+        for course in courses:
+            course["video_course"] = _video_course_flag(
+                nav, course["path"], course["catalog_path"])
         with self._lock:
             self._courses = courses
             self._by_id = by_id
@@ -746,7 +778,16 @@ class MobileAPI:
             "pct": int(round(read * 100.0 / total)) if total else 0,
             "started": bool(read or lessons),
             "last": last_row,
+            "video_course": bool(course.get("video_course")),
         }
+
+    @staticmethod
+    def _search_text(course):
+        """课程搜索用文本；视频课带上「视频课」关键字，与首页一致。"""
+        parts = [course["name"], course["author"]]
+        if course.get("video_course"):
+            parts.append("视频课")
+        return " ".join(parts).lower()
 
     def _courses(self, h, qs):
         self.index.ensure()
@@ -761,8 +802,7 @@ class MobileAPI:
             counts[course["category"]] = counts.get(course["category"], 0) + 1
             if category and course["category"] != category:
                 continue
-            if query and query not in course["name"].lower() \
-                    and query not in course["author"].lower():
+            if query and query not in self._search_text(course):
                 continue
             rows.append(self._course_row(course, snap))
         rows.sort(key=lambda r: (-(r["last"]["at"] if r["last"] else 0),))
@@ -833,6 +873,7 @@ class MobileAPI:
             "pct": int(round(read * 100.0 / total)) if total else 0,
             "chapters": chapters,
             "last": last_row,
+            "video_course": bool(course.get("video_course")),
         })
 
     def _media(self, course, idx):
@@ -1110,8 +1151,7 @@ class MobileAPI:
         courses_out, lessons_out = [], []
         snap = self.progress.snapshot()["courses"]
         for course in self.index.courses():
-            if needle in course["name"].lower() \
-                    or needle in course["author"].lower() \
+            if needle in self._search_text(course) \
                     or needle in course["identity"].lower():
                 # 与 /api/courses 同一套字段，客户端才能显示搜索结果的真实进度
                 courses_out.append(self._course_row(course, snap))

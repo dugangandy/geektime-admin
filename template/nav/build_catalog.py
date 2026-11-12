@@ -130,6 +130,7 @@ DIRECTION_MAP = {
     "人工智能基础课": "ai",
     "零基础实战机器学习": "ai",
     "机器学习40讲（完结）": "ai",
+    "机器学习40讲": "ai",
     "PyTorch 深度学习实战": "ai",
     "LangChain 实战课": "ai",
     "ClaudeCode 工程化实战": "ai",
@@ -277,6 +278,12 @@ CATEGORY_MAP = {
     "郭东白的架构课": "arch",
     "跟着高手学复盘": "life",
     "AI大模型系统实战": "cs",
+    # 2026-11-13 新增
+    "Electron开发实战": "front",
+    "Web协议详解与抓包实战": "ops",
+    "机器学习40讲": "cs",
+    "玩转Spring全家桶": "arch",
+    "玩转git三剑客": "ops",
 }
 
 # 关键词规则：按顺序匹配，命中即停（越具体越靠前）
@@ -350,15 +357,31 @@ AUTHOR_MAP = {
 }
 
 
-# 官网已下架/改名的课程：catalog.html 里查不到，手工补元数据（优先级高于 catalog.html）
+# 官网已下架/改名、或 catalog.html 存档里查不到的课程：手工补元数据
+# （优先级高于 catalog.html）。cover_url 带 OSS 缩略参数：fetch_covers 会把
+# w_127,h_167 换成 w_240,h_316，m_fill/format,webp 保证重下得到 240×316 的 WebP。
 META_OVERRIDE = {
     # 「技术领导力300讲」官网已下架，现名「技术领导力实战笔记」(id=79)，元数据取现名
     "技术领导力300讲": {
         "author": "TGO 鲲鹏会",
         "identity": "100位CTO的真知灼见",
-        "cover_url": "https://static001.geekbang.org/resource/image/e0/2c/e0b86df0337269bc897138f88eb7dd2c.jpg",
+        "cover_url": "https://static001.geekbang.org/resource/image/e0/2c/e0b86df0337269bc897138f88eb7dd2c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp",
         "learners": 85726,
     },
+    # 2026-11-13 新加入的课程：仓库暂无 catalog.html 存档，封面下载地址在此兜底
+    "Elasticsearch核心技术与实战": {"cover_url": "https://static001.geekbang.org/resource/image/d2/d7/d2a82d61c2f2f91e032c53828483f5d7.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Electron开发实战": {"cover_url": "https://static001.geekbang.org/resource/image/2b/7c/2b6142a8bedfadd031adca2aaf7e377c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Java核心技术36讲": {"cover_url": "https://static001.geekbang.org/resource/image/6f/51/6f1829aeae4e740e949340c663834551.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Selenium自动化测试实战": {"cover_url": "https://static001.geekbang.org/resource/image/2a/d6/2a8be618d516089eca0df6036f5e20d6.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Spring Boot与Kubernetes云原生微服务实践": {"cover_url": "https://static001.geekbang.org/resource/image/40/70/4038a075356662dd2b15fb82c63bf270.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Vue开发实战": {"cover_url": "https://static001.geekbang.org/resource/image/d0/6f/d0d8f61d4916a4933bfb722c1082296f.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "Web协议详解与抓包实战": {"cover_url": "https://static001.geekbang.org/resource/image/04/0a/0430f8402be85def96111b2d4950290a.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    # 官网现名「接口测试入门课」(id=100045801)
+    "接口测试实战课": {"cover_url": "https://static001.geekbang.org/resource/image/19/7f/19c0ac8c4d22d801066491442b43f17f.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "机器学习40讲": {"cover_url": "https://static001.geekbang.org/resource/image/97/5c/97a1c1639593e68f6362e7ed2cca625c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "玩转Spring全家桶": {"cover_url": "https://static001.geekbang.org/resource/image/b1/bd/b16a3f21e6e615b3403deef8decc7cbd.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "玩转git三剑客": {"cover_url": "https://static001.geekbang.org/resource/image/b8/1c/b85e7f6e5c5a42f8dabf1fb1807c971c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    "算法面试通关40讲": {"cover_url": "https://static001.geekbang.org/resource/image/b9/8c/b952e2172e8cb92364a243507a7f188c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
 }
 
 
@@ -588,11 +611,24 @@ def _build_href(name):
     return "/__build/" + urllib.parse.quote(name, safe="")
 
 
+def is_video_course(course):
+    """以视频为主体的课程：视频数超过讲数一半，且音频数少于视频数。
+
+    同时有音频又有图文的「混合课」（如 4 视频 / 49 讲 / 47 音频）不算视频课。
+    """
+    lessons = course.get("lessons") or course.get("chapters") or 0
+    videos = course.get("videos", 0)
+    audios = course.get("audios", 0)
+    return videos > lessons / 2 and audios < videos
+
+
 def card_html(course, offline=False):
     """单张课程卡片。offline=True 时 pending/failed 不生成构建链接，避免 file:// 死链。"""
     display = course.get("display") or course["name"]
     name = html_mod.escape(display)
     attrs = html_mod.escape(course["name"], quote=True)
+    video = is_video_course(course)
+    video_attr = ' data-video="1"' if video else ""
 
     # 封面区：官方角标 + 封面图（缺图用占位）
     cover = cover_src(course)
@@ -655,27 +691,31 @@ def card_html(course, offline=False):
     cta = '<span class="cta{}">{}</span>'.format(
         " " + cta_cls if cta_cls else "", cta_text)
 
+    tag_line = ('          <div class="tags"><span class="tag-video">视频课</span></div>\n'
+                if video else "")
     info = (
         '        <div class="card-info">\n'
         '          <h3 class="card-title">{}</h3>\n'
+        '{}'
         '          {}\n'
         '          {}\n'
         '          <div class="card-foot">{}</div>\n'
-        '        </div>\n'.format(name, teacher, num, cta)
+        '        </div>\n'.format(name, tag_line, teacher, num, cta)
     )
 
     if tag == "a" and href:
         return (
-            '      <a class="card" href="{}" data-name="{}" data-status="{}" style="--c:{{{{ACCENT}}}}">\n'
+            '      <a class="card" href="{}" data-name="{}" data-status="{}"{} style="--c:{{{{ACCENT}}}}">\n'
             '        <div class="cover-wrap">{}</div>\n'
             '{}'
-            '      </a>'.format(html_mod.escape(href, quote=True), attrs, status, cover_html, info)
+            '      </a>'.format(html_mod.escape(href, quote=True), attrs, status,
+                                video_attr, cover_html, info)
         )
     return (
-        '      <div class="card off" data-name="{}" data-status="{}">\n'
+        '      <div class="card off" data-name="{}" data-status="{}"{}>\n'
         '        <div class="cover-wrap">{}</div>\n'
         '{}'
-        '      </div>'.format(attrs, status, cover_html, info)
+        '      </div>'.format(attrs, status, video_attr, cover_html, info)
     )
 
 
@@ -746,6 +786,10 @@ def render(courses, title, color="#f66121", offline=False):
         n = sum(counts.get(s, 0) for s in states)
         if n:
             status_chips += _status_chip(status, label, n)
+    video_count = sum(1 for c in courses if is_video_course(c))
+    if video_count:
+        # data-status="video" 是虚拟状态，apply() 里按 data-video 属性筛选，不与卡片状态冲突
+        status_chips += _status_chip("video", "视频课", video_count)
 
     sections = "\n".join(section_html(dkey, items, offline=offline) for dkey, items in groups)
 

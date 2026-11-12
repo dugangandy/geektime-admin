@@ -54,7 +54,22 @@ class CourseAdapter(
         private val badge = Ui.tag(ctx, "").apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = ctx.dp(4) }
+        }
+        private val videoTag = Ui.videoTag(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            visibility = View.GONE
+        }
+        private val tagsRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = ctx.dp(4) }
+            addView(badge)
+            addView(videoTag)
         }
         private val name = Ui.text(ctx, "", 16f, ctx.c(R.color.text), true, 2)
         private val author = Ui.text(ctx, "", 12f, ctx.c(R.color.text_dim), false, 1).apply {
@@ -90,7 +105,7 @@ class CourseAdapter(
                 orientation = LinearLayout.VERTICAL
                 setPadding(ctx.dp(12), 0, 0, 0)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                addView(badge)
+                addView(tagsRow)
                 addView(name)
                 addView(author)
                 addView(meta)
@@ -108,6 +123,8 @@ class CourseAdapter(
 
             badge.text = course.badge
             badge.visibility = if (course.badge.isEmpty()) View.GONE else View.VISIBLE
+            videoTag.visibility = if (course.videoCourse) View.VISIBLE else View.GONE
+            tagsRow.visibility = if (course.badge.isEmpty() && !course.videoCourse) View.GONE else View.VISIBLE
             name.text = course.name
 
             val by = listOf(course.author, course.identity)
