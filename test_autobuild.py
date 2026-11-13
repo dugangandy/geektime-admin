@@ -109,6 +109,16 @@ class CollectCase(unittest.TestCase):
         write(c / "mp4-opt" / "ignored.mp4", b"mp4")
         self.assertEqual(self.catalog.count_media(c), (1, 1, 1))
 
+    def test_count_media_cache_invalidates_on_change(self):
+        c = self.root / "缓存媒体课"
+        write(c / "01.mp3", b"ID3")
+        self.assertEqual(self.catalog.count_media(c), (1, 0, 0))
+        self.assertEqual(self.catalog.count_media(c), (1, 0, 0))   # 指纹命中
+        write(c / "02.mp3", b"ID3")                                 # 顶层新增
+        self.assertEqual(self.catalog.count_media(c), (2, 0, 0))
+        write(c / "chapter" / "03.mp4", b"mp4")                     # 新子目录
+        self.assertEqual(self.catalog.count_media(c), (2, 0, 1))
+
     def test_is_video_course_rule(self):
         f = self.catalog.is_video_course
         self.assertTrue(f({"videos": 35, "lessons": 35, "audios": 0}))

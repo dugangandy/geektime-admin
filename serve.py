@@ -746,15 +746,31 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         if not self.server.cfg.no_auth:
             doc = inject_logout_widget(doc)
+        # 动态首页是 100KB 级文本：加 ETag 让重复访问直接 304，客户端支持时 gzip
+        etag = '"%s"' % hashlib.sha1(doc).hexdigest()[:16]
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("Vary", "Cookie, Accept-Encoding")
+            self.end_headers()
+            return True
+        body = doc
+        gzip_it = len(doc) > 1024 and "gzip" in self.headers.get("Accept-Encoding", "")
+        if gzip_it:
+            body = gzip.compress(doc, 5)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "private, no-cache")
+        self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Vary", "Cookie")
-        self.send_header("Content-Length", str(len(doc)))
+        self.send_header("Vary", "Cookie, Accept-Encoding")
+        if gzip_it:
+            self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
-            self._write(doc)
+            self._write(body)
         return True
 
     # ---------------------------------------------------------------- 响应

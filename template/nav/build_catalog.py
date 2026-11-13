@@ -310,14 +310,48 @@ KEYWORD_RULES = [
 
 # ---------------------------------------------------------------- 工具函数
 
+# count_media 结果缓存：路径 -> (目录指纹, (音频, PDF, 视频))。
+# 批量转码/新增课程会让首页签名频繁失效，没有它每次都要重走两万多个文件。
+_MEDIA_CACHE = {}
+_MEDIA_CACHE_MAX = 512
+
+
+def _media_stamp(course_dir):
+    """目录指纹：课程目录自身 + 非产物类一级子目录的 mtime/size。
+
+    只 readdir 目录、不遍历文件，用来判断 count_media 的结果能否复用；
+    往 html/、mp3/、章节目录里增删文件会改子目录 mtime，因此能被发现。
+    """
+    st = os.stat(course_dir)
+    parts = [("", st.st_mtime_ns, st.st_size)]
+    with os.scandir(course_dir) as it:
+        for e in it:
+            if e.name in SKIP_DIRS or not e.is_dir():
+                continue
+            s = e.stat()
+            parts.append((e.name, s.st_mtime_ns, s.st_size))
+    parts.sort()
+    return tuple(parts)
+
+
 def count_media(course_dir):
     """一次 os.walk 统计音频 / PDF / 视频，跳过 reader/、mp4-opt/ 等产物目录。
 
     旧实现按后缀各跑一次 Path.rglob('*')，整棵课程目录树要遍历、stat 三遍，
     两万多个文件时首页冷启动要数秒。os.walk 复用 scandir 缓存的类型信息，
-    不做额外 stat，一遍即可拿到三个计数。
+    不做额外 stat，一遍即可拿到三个计数。结果按目录指纹缓存：批量转码期间
+    课程目录频繁变化时，只有真正变动的那门课需要重数。
     """
     base = str(course_dir)
+    stamp = None
+    try:
+        stamp = _media_stamp(base)
+    except OSError:
+        pass
+    if stamp is not None:
+        hit = _MEDIA_CACHE.get(base)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
     audios = pdfs = videos = 0
     for dirpath, dirnames, filenames in os.walk(base):
         if dirpath == base:
@@ -330,7 +364,12 @@ def count_media(course_dir):
                 pdfs += 1
             elif ext in VIDEO_EXTS:
                 videos += 1
-    return audios, pdfs, videos
+    result = (audios, pdfs, videos)
+    if stamp is not None:
+        if len(_MEDIA_CACHE) >= _MEDIA_CACHE_MAX:
+            _MEDIA_CACHE.clear()
+        _MEDIA_CACHE[base] = (stamp, result)
+    return result
 
 
 def read_reader_meta(reader_dir):
