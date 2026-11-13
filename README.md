@@ -209,10 +209,12 @@ python template/reader/build.py "<课程目录>" --title "课程名" --author "�
 bash template/reader/build_all.sh
 bash template/reader/build_all.sh Redis
 
-# 视频：重封装成 faststart（moov 前置），不转码；默认写到 <课程>/mp4-opt/
+# 视频：mp4 重封装成 faststart（moov 前置），不转码；默认写到 <课程>/mp4-opt/
+#       TS 转封装成 mp4（画面无损复制，音频断裂时只重编码音轨），产物落在源文件旁
 python faststart_mp4.py "<课程目录>" --dry-run
 python faststart_mp4.py "<课程目录>"
 python faststart_mp4.py "<课程目录>" --in-place --yes    # 原地替换，保留 mtime
+python faststart_mp4.py "<课程目录>" --in-place --yes --remove-ts  # TS 转完删源
 ```
 
 `build.py` 产物为 `<课程>/reader/` 下的 `index.html`、`assets/`、`data/catalog.js`、`pages/NNN.html`；重复执行幂等，不改动课程正文。

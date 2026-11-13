@@ -4,6 +4,7 @@
 运行：python -m unittest test_autobuild -v
 """
 import json
+import os
 import re
 import shutil
 import sys
@@ -349,6 +350,58 @@ class SyncUiDataDirCase(unittest.TestCase):
             (d / "catalog.js").write_text("window.COURSE={};", encoding="utf-8")
             self.assertEqual([n for n, _ in mod.find_readers([], str(root))], ["课程A"])
             self.assertEqual(mod.find_readers(["不存在"], str(root)), [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class FaststartTsCase(unittest.TestCase):
+    """faststart_mp4.py 的 TS 转封装：落点规则与扫描范围。"""
+
+    def setUp(self):
+        import importlib.util
+        path = HERE / "faststart_mp4.py"
+        spec = importlib.util.spec_from_file_location("gk_faststart", path)
+        self.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.mod)
+
+    def test_ts_output_is_mp4_next_to_source(self):
+        root = os.path.join("/data", "course")
+        src = os.path.join(root, "a.ts")
+        self.assertEqual(self.mod.dst_for(src, root, "/out", False),
+                         os.path.join(root, "a.mp4"))
+        # --out 与 --in-place 都不改变 TS 的落点（阅读器只认课程根目录/附件目录）
+        self.assertEqual(self.mod.dst_for(src, root, "/out", True),
+                         os.path.join(root, "a.mp4"))
+        self.assertEqual(self.mod.dst_for(os.path.join(root, "a.TS"), root, "/out", True),
+                         os.path.join(root, "a.mp4"))
+
+    def test_mp4_keeps_original_rules(self):
+        root = os.path.join("/data", "course")
+        sub = os.path.join(root, "sub", "a.mp4")
+        self.assertEqual(self.mod.dst_for(sub, root, "/out", False),
+                         os.path.join("/out", "sub", "a.mp4"))
+        self.assertEqual(self.mod.dst_for(sub, root, "/out", True), sub)
+
+    def test_find_videos_includes_ts_and_skips_outputs(self):
+        root = Path(tempfile.mkdtemp(prefix="gk-ts-"))
+        try:
+            (root / "a.ts").write_bytes(b"ts")
+            (root / "b.mp4").write_bytes(b"mp4")
+            (root / "notes.txt").write_bytes(b"x")
+            for skip in ("reader", "mp4-opt"):
+                (root / skip).mkdir()
+                (root / skip / "c.mp4").write_bytes(b"mp4")
+            names = [os.path.basename(p) for p in self.mod.find_videos(str(root))]
+            self.assertEqual(names, ["a.ts", "b.mp4"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_remove_ts_requires_in_place_and_yes(self):
+        root = Path(tempfile.mkdtemp(prefix="gk-ts-"))
+        try:
+            (root / "a.ts").write_bytes(b"ts")
+            with self.assertRaises(SystemExit):
+                self.mod.main([str(root), "--remove-ts", "--dry-run"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
