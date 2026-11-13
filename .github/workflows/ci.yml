@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [dev, main]
+    tags: ["v*", "[0-9]*"]
   pull_request:
   workflow_dispatch:
 
@@ -97,3 +98,33 @@ jobs:
           path: out/*.apk
           if-no-files-found: error
           retention-days: 14
+
+  # 打 tag（v1.2.3 / 1.2.3）时把上面构建好的 APK 附到 GitHub Release；
+  # 复用 android job 的产物，不重复编译。needs 保证测试与编译都过了才发。
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: GeekTimeReader-debug
+          path: out
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -lh out
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/*.apk --clobber
+          else
+            gh release create "$TAG" out/*.apk --title "$TAG" --generate-notes
+          fi
