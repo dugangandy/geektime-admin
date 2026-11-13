@@ -80,3 +80,20 @@ jobs:
       - name: Assemble debug APK
         working-directory: android
         run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      # 按 npm run dist:apk 的命名规则整理产物，便于直接下载安装
+      - name: Stage APK
+        run: |
+          VERSION="$(sed -n 's/^versionName=//p' android/version.properties | tr -d '\r')"
+          test -n "$VERSION" || VERSION="dev"
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/GeekTimeReader-$VERSION-debug.apk"
+          ls -lh out
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: GeekTimeReader-debug
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 14
