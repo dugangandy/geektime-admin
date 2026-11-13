@@ -1,0 +1,28 @@
+<!-- 自适应图标前景层：薄荷绿三段声波 + 珊瑚橙凝聚点，透明底，锁在 66dp 安全区 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 书页基线（淡薄荷） -->
+    <path
+        android:fillColor="@color/brand_mint"
+        android:fillAlpha="0.45"
+        android:pathData="M33,72 h42 a3,3 0 0,1 0,6 h-42 a3,3 0 0,1 0,-6 Z" />
+    <!-- 三段向上声波条 -->
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M36,55 h8 a4,4 0 0,1 4,4 v10 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-10 a4,4 0 0,1 4,-4 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M50,42 h8 a4,4 0 0,1 4,4 v23 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-23 a4,4 0 0,1 4,-4 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M64,48 h8 a4,4 0 0,1 4,4 v17 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-17 a4,4 0 0,1 4,-4 Z" />
+    <!-- 珊瑚橙凝聚点 -->
+    <circle
+        android:cx="54"
+        android:cy="30"
+        android:r="5"
+        android:fillColor="@color/brand_coral" />
+</vector>

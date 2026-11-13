@@ -417,7 +417,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         loadingCourses = true
-        if (!silent) showEmpty("正在加载课程…", null)
+        if (!silent) showSkeleton()
         lifecycleScope.launch {
             try {
                 val data = api.courses()
@@ -426,6 +426,8 @@ class MainActivity : AppCompatActivity() {
                     buildChips()
                     renderCourses()
                     refresh.isRefreshing = false
+                    // 首次进入：骨架 → 列表淡入；下拉刷新不重播，避免每次刷新都晃一下
+                    if (!silent) Ui.fadeInUp(refresh, 0, 8)
                 }
             } catch (e: AuthExpired) {
                 goLogin()
@@ -495,6 +497,8 @@ class MainActivity : AppCompatActivity() {
                 renderCourses()
             }
         } else {
+            // 骨架要真正移除，不然呼吸动画会在不可见的占位里一直空转
+            listEmpty.removeAllViews()
             listEmpty.visibility = View.GONE
             refresh.visibility = View.VISIBLE
         }
@@ -539,6 +543,15 @@ class MainActivity : AppCompatActivity() {
         card.addView(row)
         card.setOnClickListener { openReader(course.id, last.lesson, course.name, last.title) }
         continueBox.addView(card)
+    }
+
+    /** 首屏加载占位：和卡片列表同版式的骨架屏，比「正在加载…」少一次视觉跳变。 */
+    private fun showSkeleton() {
+        listEmpty.gravity = Gravity.TOP
+        listEmpty.removeAllViews()
+        listEmpty.addView(Skeleton.cards(this))
+        listEmpty.visibility = View.VISIBLE
+        refresh.visibility = View.GONE
     }
 
     private fun showEmpty(message: String, action: String?, onAction: (() -> Unit)? = null) {

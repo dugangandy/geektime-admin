@@ -12,4 +12,8 @@
     <color name="red">#E5484D</color>
     <color name="tag_video">#2F5BD7</color>
     <color name="scrim">#99000000</color>
+    <!-- 极客听书品牌色：深墨蓝底 / 薄荷绿动作色 / 珊瑚橙点睛 -->
+    <color name="brand_navy">#102A43</color>
+    <color name="brand_mint">#59E1B3</color>
+    <color name="brand_coral">#FF8066</color>
 </resources>

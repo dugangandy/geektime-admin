@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.CheckBox
@@ -13,7 +14,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -27,12 +27,15 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var password: EditText
     private lateinit var pingLabel: TextView
     private lateinit var loginButton: TextView
-    private lateinit var progress: ProgressBar
+    private lateinit var loading: DropLoadingView
     private lateinit var rememberBox: CheckBox
     private lateinit var visibleToggle: TextView
     private var busy = false
     private var passwordVisible = false
     private var lockUntil = 0L
+    /** splash 阶段表单还没建，onSaveInstanceState 里的控件引用都还不能碰。 */
+    private var formBuilt = false
+    private var splashAt = 0L
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val lockTick = object : Runnable {
@@ -53,11 +56,24 @@ class LoginActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         api = (application as GkApp).api
         prefs = (application as GkApp).prefs
-        setContentView(buildUi())
-        if (savedInstanceState != null) {
-            passwordVisible = savedInstanceState.getBoolean(STATE_VISIBLE, false)
-            pingLabel.text = savedInstanceState.getString(STATE_HINT).orEmpty()
-            lockUntil = savedInstanceState.getLong(STATE_LOCK, 0L)
+        // 已登录时先显示品牌启动页再静默校验：直接铺登录表单会「闪一下服务器连接页」
+        if (savedInstanceState == null && api.hasSession()) {
+            splashAt = android.os.SystemClock.elapsedRealtime()
+            setContentView(buildSplash())
+            silentSessionCheck()
+        } else {
+            showForm(savedInstanceState)
+        }
+    }
+
+    private fun showForm(state: Bundle?) {
+        formBuilt = true
+        val view = buildUi()
+        setContentView(view)
+        if (state != null) {
+            passwordVisible = state.getBoolean(STATE_VISIBLE, false)
+            pingLabel.text = state.getString(STATE_HINT).orEmpty()
+            lockUntil = state.getLong(STATE_LOCK, 0L)
             applyPasswordVisibility()
             if (lockLeftSec() > 0) {
                 pingLabel.setTextColor(c(R.color.red))
@@ -65,11 +81,12 @@ class LoginActivity : AppCompatActivity() {
                 handler.post(lockTick)
             }
         }
-        if (api.hasSession()) silentSessionCheck()
+        Ui.fadeIn(view, 0.85f, 180)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        if (!formBuilt) return
         outState.putBoolean(STATE_VISIBLE, passwordVisible)
         outState.putString(STATE_HINT, pingLabel.text.toString())
         outState.putLong(STATE_LOCK, lockUntil)
@@ -82,6 +99,39 @@ class LoginActivity : AppCompatActivity() {
 
     private fun lockLeftSec(): Int =
         ((lockUntil - android.os.SystemClock.elapsedRealtime()) / 1000).toInt().coerceAtLeast(0)
+
+    /** 冷启动占位：品牌页 + 转圈，会话校验期间显示，避免先铺登录表单。 */
+    private fun buildSplash(): ViewGroup {
+        val box = FrameLayout(this).apply { setBackgroundColor(c(R.color.bg)) }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER
+            )
+        }
+        col.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_launcher)
+            layoutParams = LinearLayout.LayoutParams(dp(64), dp(64))
+        })
+        col.addView(Ui.text(this, "极客时间", 20f, c(R.color.text), true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(16), 0, 0)
+        })
+        col.addView(Ui.text(this, "正在连接课程库…", 12f, c(R.color.text_dim)).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, 0)
+        })
+        col.addView(DropLoadingView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = dp(22)
+            }
+        })
+        box.addView(col)
+        Ui.fadeIn(box, 0.7f, 180)
+        return box
+    }
 
     private fun buildUi(): ViewGroup {
         val ctx = this
@@ -112,14 +162,23 @@ class LoginActivity : AppCompatActivity() {
         ))
 
         content.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_launcher)
+            setImageResource(R.drawable.ic_brand)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             layoutParams = LinearLayout.LayoutParams(ctx.dp(72), ctx.dp(72))
                 .apply { gravity = Gravity.CENTER_HORIZONTAL }
         })
-        content.addView(Ui.text(this, "极客时间", 24f, ctx.c(R.color.text), true).apply {
+        content.addView(Ui.text(this, "极客听书", 24f, ctx.c(R.color.text), true).apply {
             gravity = Gravity.CENTER
             setPadding(0, ctx.dp(14), 0, ctx.dp(6))
         })
+        val slogan = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, ctx.dp(6), 0, ctx.dp(2))
+        }
+        slogan.addView(Ui.text(this, "听一课，", 14f, ctx.c(R.color.text)))
+        slogan.addView(Ui.text(this, "即刻成长", 14f, ctx.c(R.color.brand_mint), true))
+        content.addView(slogan)
         content.addView(
             Ui.text(this, "本地课程库 · 随身学每一讲", 13f, ctx.c(R.color.text_dim)).apply {
                 gravity = Gravity.CENTER
@@ -208,15 +267,15 @@ class LoginActivity : AppCompatActivity() {
         }
         content.addView(loginButton)
 
-        progress = ProgressBar(this).apply {
-            visibility = ProgressBar.GONE
-            layoutParams = LinearLayout.LayoutParams(ctx.dp(24), ctx.dp(24))
+        loading = DropLoadingView(this).apply {
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(ctx.dp(56), ctx.dp(56))
                 .apply {
                     gravity = Gravity.CENTER_HORIZONTAL
                     topMargin = ctx.dp(10)
                 }
         }
-        content.addView(progress)
+        content.addView(loading)
 
         content.addView(Ui.text(this, "常用地址", 12f, ctx.c(R.color.text_dim)).apply {
             setPadding(0, ctx.dp(26), 0, ctx.dp(6))
@@ -280,7 +339,7 @@ class LoginActivity : AppCompatActivity() {
         val blocked = busy || lockLeftSec() > 0
         loginButton.alpha = if (blocked) 0.55f else 1f
         loginButton.isClickable = !blocked
-        progress.visibility = if (busy) ProgressBar.VISIBLE else ProgressBar.GONE
+        loading.visibility = if (busy) View.VISIBLE else View.GONE
     }
 
     private fun testConnection() {
@@ -318,8 +377,7 @@ class LoginActivity : AppCompatActivity() {
                 // 只有登录成功才落盘，否则失败的尝试会把上次的选择改掉
                 prefs.remember = rememberBox.isChecked
                 setBusy(false)
-                startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                finish()
+                goMain()
             } catch (e: ApiException) {
                 setBusy(false)
                 when (e.code) {
@@ -347,16 +405,28 @@ class LoginActivity : AppCompatActivity() {
 
     private fun silentSessionCheck() {
         lifecycleScope.launch {
-            try {
+            val ok = try {
                 api.session()
-                startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                finish()
-            } catch (_: AuthExpired) {
-                // 会话过期，留在登录页
+                true
             } catch (_: Exception) {
-                // 网络不通时仍允许手动登录重试
+                // 会话过期 / 网络不通：都退回登录页，允许手动重试
+                false
             }
+            if (!ok) {
+                showForm(null)
+                return@launch
+            }
+            // 至少露一下品牌页，别让极快的返回把启动页闪成白屏
+            val shown = android.os.SystemClock.elapsedRealtime() - splashAt
+            handler.postDelayed({ goMain() }, (220L - shown).coerceAtLeast(0L))
         }
+    }
+
+    private fun goMain() {
+        if (isFinishing || isDestroyed) return
+        startActivity(Intent(this@LoginActivity, MainActivity::class.java))
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        finish()
     }
 
     companion object {

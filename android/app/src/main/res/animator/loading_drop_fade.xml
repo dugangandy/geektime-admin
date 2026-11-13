@@ -1,0 +1,11 @@
+<!-- 水滴淡出：前 60% 保持，末段淡出，避免落底瞬间硬切 -->
+<objectAnimator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:propertyName="alpha"
+    android:duration="450"
+    android:repeatCount="-1">
+    <propertyValuesHolder android:propertyName="alpha">
+        <keyframe android:fraction="0" android:value="1" />
+        <keyframe android:fraction="0.6" android:value="1" />
+        <keyframe android:fraction="1" android:value="0" />
+    </propertyValuesHolder>
+</objectAnimator>

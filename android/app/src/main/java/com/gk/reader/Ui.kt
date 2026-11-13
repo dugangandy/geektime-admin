@@ -161,6 +161,88 @@ object Ui {
             isClickable = true
         }
 
+    /** 胶囊按钮（倍速 / 定时 / 排序）：浅底、圆角、可带前置小图标，文字走 tag 改写。 */
+    fun pill(
+        ctx: Context,
+        label: String,
+        @DrawableRes icon: Int = 0,
+        onClick: (() -> Unit)? = null
+    ): LinearLayout {
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(ctx.dp(12), ctx.dp(7), ctx.dp(12), ctx.dp(7))
+            background = roundBg(ctx, ctx.c(R.color.surface_alt), 16f)
+            if (onClick != null) {
+                isClickable = true
+                setOnClickListener { onClick() }
+                foreground = ripple(ctx, Color.TRANSPARENT, 16f)
+            }
+        }
+        if (icon != 0) {
+            val mark = icon(ctx, icon, ctx.c(R.color.text_dim), 12)
+            (mark.layoutParams as? LinearLayout.LayoutParams)?.marginEnd = ctx.dp(5)
+            box.addView(mark)
+        }
+        val labelView = text(ctx, label, 12f, ctx.c(R.color.text), false, 1)
+        box.addView(labelView)
+        box.tag = labelView
+        return box
+    }
+
+    /** 描边圆形图标按钮（目录行右侧的播放键）。 */
+    fun circleIcon(
+        ctx: Context,
+        @DrawableRes res: Int,
+        sizeDp: Int,
+        tint: Int,
+        desc: String? = null,
+        onClick: (() -> Unit)? = null
+    ): FrameLayout {
+        val box = FrameLayout(ctx).apply {
+            background = roundBg(ctx, Color.TRANSPARENT, sizeDp / 2f, ctx.c(R.color.line), 1f)
+            layoutParams = LinearLayout.LayoutParams(ctx.dp(sizeDp), ctx.dp(sizeDp))
+            if (onClick != null) {
+                isClickable = true
+                setOnClickListener { onClick() }
+                foreground = ripple(ctx, Color.TRANSPARENT, sizeDp / 2f)
+            }
+        }
+        val mark = icon(ctx, res, tint, (sizeDp * 0.62f).toInt(), desc, null)
+        mark.setPadding(0, 0, 0, 0)
+        box.addView(mark, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER
+        ))
+        box.contentDescription = desc
+        return box
+    }
+
+    /** 竖排「图标 + 文字」入口（播放页底部的目录 / 收藏 / 讲义）。 */
+    fun iconAction(
+        ctx: Context,
+        @DrawableRes res: Int,
+        label: String,
+        tint: Int,
+        onClick: () -> Unit
+    ): LinearLayout {
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, ctx.dp(6), 0, ctx.dp(6))
+            isClickable = true
+            background = ripple(ctx, Color.TRANSPARENT, 12f)
+            setOnClickListener { onClick() }
+        }
+        box.addView(icon(ctx, res, tint, 22), LinearLayout.LayoutParams(ctx.dp(22), ctx.dp(22)))
+        val labelView = text(ctx, label, 11f, ctx.c(R.color.text_dim), false, 1).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, ctx.dp(5), 0, 0)
+        }
+        box.addView(labelView)
+        box.tag = labelView
+        return box
+    }
+
     fun tag(ctx: Context, label: String): TextView =
         text(ctx, label, 10f, ctx.c(R.color.orange), true).apply {
             setPadding(ctx.dp(6), ctx.dp(2), ctx.dp(6), ctx.dp(2))
@@ -203,6 +285,26 @@ object Ui {
             // 调用方改标题走 tag，不要 getChildAt(1) 硬编码位置
             tag = titleView
         }
+
+    /** 内容加载完成后的入场：淡入 + 轻微上移，避免骨架/列表硬切。 */
+    fun fadeInUp(view: View, delayMs: Long = 0L, offsetDp: Int = 10) {
+        view.animate().cancel()
+        view.alpha = 0f
+        view.translationY = view.context.dp(offsetDp).toFloat()
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setStartDelay(delayMs)
+            .setDuration(240)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .start()
+    }
+
+    fun fadeIn(view: View, from: Float = 0f, durationMs: Long = 200) {
+        view.animate().cancel()
+        view.alpha = from
+        view.animate().alpha(1f).setDuration(durationMs).start()
+    }
 
     fun toast(ctx: Context, msg: String) {
         android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
@@ -287,7 +389,12 @@ class MaxWidthLayout(context: Context, private val maxDp: Int = 720) : FrameLayo
 }
 
 /** 3dp 细进度条（课程卡 / 详情头）。 */
-class ProgressLine(context: Context, private val heightDp: Float = 3f) : View(context) {
+class ProgressLine(
+    context: Context,
+    private val heightDp: Float = 3f,
+    trackColor: Int? = null,
+    fillColor: Int? = null
+) : View(context) {
     private val track = Paint(Paint.ANTI_ALIAS_FLAG)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
@@ -298,8 +405,8 @@ class ProgressLine(context: Context, private val heightDp: Float = 3f) : View(co
         }
 
     init {
-        track.color = context.c(R.color.line)
-        fill.color = context.c(R.color.orange)
+        track.color = trackColor ?: context.c(R.color.line)
+        fill.color = fillColor ?: context.c(R.color.orange)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -317,5 +424,90 @@ class ProgressLine(context: Context, private val heightDp: Float = 3f) : View(co
             rect.set(0f, 0f, width * pct / 100f, height.toFloat())
             canvas.drawRoundRect(rect, r, r, fill)
         }
+    }
+}
+
+/**
+ * 播放页进度条：细轨道 + 橙色已播段 + 末端圆点，拖动手感跟官方一致。
+ * 只上报比例，时间换算交给调用方，避免和播放器状态互相覆盖。
+ */
+class SlidingSeek(context: Context) : View(context) {
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = context.c(R.color.line)
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = context.c(R.color.orange)
+    }
+    private val knob = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = context.c(R.color.orange) }
+
+    private val stroke = context.dp(3f)
+    private val knobR = context.dp(5.5f)
+    private var dragging = false
+
+    var ratio: Float = 0f
+        set(value) {
+            field = value.coerceIn(0f, 1f)
+            if (!dragging) invalidate()
+        }
+
+    /** 拖动中/结束：true 表示手指按下，调用方别再刷新进度。 */
+    var onSeekingChange: ((Boolean) -> Unit)? = null
+    var onSeek: ((Float) -> Unit)? = null
+
+    init {
+        isClickable = true
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), context.dp(28f))
+    }
+
+    private fun xOf(value: Float): Float {
+        val span = (width - 2 * knobR).coerceAtLeast(0).toFloat()
+        return knobR + span * value.coerceIn(0f, 1f)
+    }
+
+    private fun ratioAt(x: Float): Float {
+        val span = (width - 2 * knobR).coerceAtLeast(1).toFloat()
+        return ((x - knobR) / span).coerceIn(0f, 1f)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val cy = height / 2f
+        val from = xOf(0f)
+        val to = xOf(1f)
+        val head = xOf(ratio)
+        fill.strokeWidth = stroke.toFloat()
+        track.strokeWidth = stroke.toFloat()
+        canvas.drawLine(from, cy, to, cy, track)
+        if (head > from) canvas.drawLine(from, cy, head, cy, fill)
+        canvas.drawCircle(head, cy, knobR.toFloat(), knob)
+    }
+
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                dragging = true
+                parent?.requestDisallowInterceptTouchEvent(true)
+                ratio = ratioAt(event.x)
+                onSeekingChange?.invoke(true)
+            }
+            android.view.MotionEvent.ACTION_MOVE -> if (dragging) ratio = ratioAt(event.x)
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (dragging) {
+                    val target = ratioAt(event.x)
+                    ratio = target
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    onSeek?.invoke(target)
+                    onSeekingChange?.invoke(false)
+                }
+            }
+        }
+        return true
     }
 }

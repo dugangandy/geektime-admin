@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -47,13 +48,30 @@ object PlayerController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var tickerOn = false
+
+    /** 按分钟定时：到点时间戳，0 表示没有。 */
     private var sleepUntil = 0L
+
+    /** 按集数定时：还剩几集（含正在播的这集），0 表示没有。 */
+    private var sleepEpisodes = 0
+
+    /** 已到点但勾了「播完整集声音再停止」，等这集播完再暂停。 */
+    private var sleepHeld = false
+
+    /** 当前按分钟定时选的是几分钟（弹窗高亮用，不随倒计时变）。 */
+    private var sleepMinutesChosen = 0
     private var playJob: kotlinx.coroutines.Job? = null
 
     /** 独立闹钟：睡眠定时不能依赖 ticker，否则所有页面退到后台后就停摆了。 */
     private val sleepAlarm = Runnable {
         sleepUntil = 0
-        controller?.pause()
+        sleepMinutesChosen = 0
+        // 勾了「播完整集声音再停止」就别切断正在讲的这集，等换集时再停
+        if (prefsOrNull()?.sleepFinishEpisode == true && controller?.isPlaying == true) {
+            sleepHeld = true
+        } else {
+            controller?.pause()
+        }
         notifyState()
     }
 
@@ -82,6 +100,8 @@ object PlayerController {
                 connecting = null
                 c.addListener(object : Player.Listener {
                     override fun onEvents(player: Player, events: Player.Events) = notifyState()
+                    override fun onMediaItemTransition(item: MediaItem?, reason: Int) =
+                        onItemChanged(reason)
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         notifyState()
                     }
@@ -111,6 +131,8 @@ object PlayerController {
         ensure(app)
         val start = startIndex.coerceIn(0, queue.size - 1)
         val api = (app as GkApp).api
+        // 换队列后「等本集播完」的挂起状态失效，避免刚点新的一讲就被暂停
+        sleepHeld = false
         playJob?.cancel()
         playJob = scope.launch {
             // 同一门课所有讲次共用封面，按 URL 缓存，避免 N 份全尺寸字节进 MediaItem
@@ -257,23 +279,90 @@ object PlayerController {
     }
 
     // ------------------------------------------------------------ 定时关闭
+    /** 按分钟定时；minutes <= 0 等同取消。两种定时互斥，设了时长就清掉集数。 */
     fun setSleep(minutes: Int) {
         handler.removeCallbacks(sleepAlarm)
+        sleepHeld = false
+        sleepEpisodes = 0
+        sleepMinutesChosen = if (minutes > 0) minutes else 0
         sleepUntil = if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0
         if (sleepUntil > 0) {
+            prefsOrNull()?.sleepMinutes = minutes
             handler.postDelayed(sleepAlarm, sleepUntil - System.currentTimeMillis())
         }
+        notifyState()
+    }
+
+    /** 播完 count 集后停（含正在播的这集）；count <= 0 等同取消。 */
+    fun setSleepEpisodes(count: Int) {
+        handler.removeCallbacks(sleepAlarm)
+        sleepUntil = 0
+        sleepMinutesChosen = 0
+        sleepHeld = false
+        sleepEpisodes = count.coerceAtLeast(0)
         notifyState()
     }
 
     fun clearSleep() {
         handler.removeCallbacks(sleepAlarm)
         sleepUntil = 0
+        sleepMinutesChosen = 0
+        sleepEpisodes = 0
+        sleepHeld = false
         notifyState()
     }
 
     fun sleepRemainingMs(): Long =
         if (sleepUntil > 0) (sleepUntil - System.currentTimeMillis()).coerceAtLeast(0) else 0
+
+    /** 当前按分钟定时选中的分钟数，0 表示不是时长定时。 */
+    fun sleepMinutes(): Int = sleepMinutesChosen
+
+    /** 按集数定时还剩几集，0 表示不是集数定时。 */
+    fun sleepEpisodesLeft(): Int = sleepEpisodes
+
+    /** 上次用的分钟数，弹窗「上次定时」行展示。 */
+    fun lastSleepMinutes(): Int = prefsOrNull()?.sleepMinutes ?: 15
+
+    fun sleepFinishEpisode(): Boolean = prefsOrNull()?.sleepFinishEpisode == true
+
+    fun setSleepFinishEpisode(on: Boolean) {
+        prefsOrNull()?.sleepFinishEpisode = on
+        notifyState()
+    }
+
+    /** 定时状态胶囊文案，null 表示没开定时。 */
+    fun sleepLabel(): String? = when {
+        sleepHeld || sleepEpisodes == 1 -> "本集后停"
+        sleepEpisodes > 1 -> "剩 $sleepEpisodes 集"
+        sleepUntil > 0 -> {
+            val left = sleepRemainingMs()
+            String.format(Locale.US, "定时 %d:%02d", left / 60_000, (left % 60_000) / 1000)
+        }
+        else -> null
+    }
+
+    /**
+     * 换集回调：先处理「等本集播完再停」，再按集数扣减。
+     * 只认自动切换，手动点下一讲不算播完一集。
+     */
+    private fun onItemChanged(reason: Int) {
+        if (sleepHeld) {
+            sleepHeld = false
+            controller?.pause()
+            notifyState()
+            return
+        }
+        if (sleepEpisodes <= 0) return
+        if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) return
+        sleepEpisodes -= 1
+        if (sleepEpisodes == 0) {
+            // 下一讲已经起播，拉回开头再暂停，醒来还能接着听
+            controller?.pause()
+            controller?.seekTo(0)
+        }
+        notifyState()
+    }
 
     // ------------------------------------------------------------ 订阅
     fun observe(listener: (PlayState) -> Unit): (PlayState) -> Unit {
@@ -310,4 +399,7 @@ object PlayerController {
     }
 
     private fun prefs(): Prefs = (appContext as GkApp).prefs
+
+    /** 定时可能在任何页面被触发，拿不到上下文时按「未开启」处理而不是崩。 */
+    private fun prefsOrNull(): Prefs? = (appContext as? GkApp)?.prefs
 }

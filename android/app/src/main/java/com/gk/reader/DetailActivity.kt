@@ -3,6 +3,7 @@ package com.gk.reader
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -13,18 +14,24 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * 课程详情：深色课程头（课名 / 作者 / 整体进度）+ 分组目录列表。
+ * 目录头部固定，只有讲次列表滚动；「回到上次学习」浮在右下角。
+ */
 class DetailActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
-        private const val STATE_EXPANDED = "state_expanded"
         private const val STATE_SCROLL = "state_scroll"
+        /** 头部深色底，和封面遮罩同色；状态栏也跟随它。 */
+        private const val HEADER_DARK = 0xFF16171C.toInt()
 
         fun open(ctx: Context, courseId: String, courseName: String) {
             ctx.startActivity(
@@ -36,30 +43,35 @@ class DetailActivity : AppCompatActivity() {
     }
 
     private val api: Api get() = (application as GkApp).api
-    private lateinit var prefs: Prefs
-    private lateinit var topTitle: TextView
-    private lateinit var body: LinearLayout
     private lateinit var scroll: ScrollView
+    private lateinit var listBox: LinearLayout
     private lateinit var mini: MiniPlayer
-    private lateinit var progressLine: ProgressLine
-    private lateinit var progressText: TextView
-    private lateinit var continueButton: TextView
+    private lateinit var fab: TextView
+    private lateinit var coverBg: CoverView
+    private lateinit var headName: TextView
+    private lateinit var headByline: TextView
+    private lateinit var headMeta: TextView
+    private lateinit var headPct: TextView
+    private lateinit var headProgress: ProgressLine
+    private lateinit var badgeView: TextView
+    private lateinit var sortLabel: TextView
 
     private var courseId = ""
     private var courseName = ""
     private var detail: CourseDetail? = null
-    /** 按章节序号记展开状态：同名章节（如「结束语」）用名字做键会互相串。 */
-    private val expanded = HashSet<Int>()
+    /** 折叠的章节（用对象引用做键：同名章节也不会互相串）。 */
+    private val collapsed = HashSet<Chapter>()
+    private var sortDesc = false
+    private var filter = 0
+    private val rows = HashMap<Int, LessonRowView>()
+    private var playingIdx = -1
     private var firstResume = true
     private var built = false
     private var restoreScroll = -1
-    private val rowMarks = HashMap<Int, Pair<LinearLayout, View>>()
-    private var playingIdx = -1
     private var playObserver: ((PlayState) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = (application as GkApp).prefs
         courseId = intent.getStringExtra(EXTRA_ID).orEmpty()
         courseName = intent.getStringExtra(EXTRA_NAME).orEmpty()
         if (courseId.isEmpty()) {
@@ -67,39 +79,20 @@ class DetailActivity : AppCompatActivity() {
             return
         }
         if (savedInstanceState != null) {
-            savedInstanceState.getIntegerArrayList(STATE_EXPANDED)?.let { expanded.addAll(it) }
             restoreScroll = savedInstanceState.getInt(STATE_SCROLL, -1)
         }
+        window.statusBarColor = HEADER_DARK
+        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(c(R.color.bg))
-        }
-        val bar = Ui.topBar(this, courseName.ifEmpty { "课程详情" }) { finish() }
-        topTitle = bar.tag as TextView
-        root.addView(bar)
-        scroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-            isFillViewport = true
-        }
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(body)
-        root.addView(scroll)
-        mini = MiniPlayer(this).apply { attach() }
-        root.addView(mini, MiniPlayer.layoutParams(this))
-        setContentView(root)
+        buildUi()
         built = true
         playObserver = PlayerController.observe { syncPlaying(it) }
-
         showLoading()
         load(false)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putIntegerArrayList(STATE_EXPANDED, ArrayList(expanded))
         if (built) outState.putInt(STATE_SCROLL, scroll.scrollY)
     }
 
@@ -114,9 +107,170 @@ class DetailActivity : AppCompatActivity() {
         load(true)
     }
 
+    // ------------------------------------------------------------ 布局
+    private fun buildUi() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(c(R.color.bg))
+        }
+
+        // 课程头：封面铺底 + 深色渐变，保证白色文字在任何封面上都可读
+        // 高度必须写死：封面用 MATCH_PARENT 铺底时，wrap_content 会被封面原图尺寸撑到整屏，
+        // 下面的内容区就会只剩 0 高（整页看起来只有深色封面）。
+        val header = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(150)
+            )
+        }
+        coverBg = CoverView(this, 1, 1, 0f).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            alpha = 0.45f
+        }
+        header.addView(coverBg)
+        header.addView(View(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            background = GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(HEADER_DARK, 0xF016171C.toInt(), 0xC016171C.toInt())
+            )
+        })
+
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), 0, dp(18), dp(24))
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+        }
+        titleRow.addView(Ui.icon(this, R.drawable.ic_back, Color.WHITE, 24, "返回") { finish() })
+        headName = Ui.text(this, courseName.ifEmpty { "课程详情" }, 18f, Color.WHITE, true, 1).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(4) }
+        }
+        titleRow.addView(headName)
+        badgeView = Ui.tag(this, "").apply { visibility = View.GONE }
+        titleRow.addView(badgeView)
+        column.addView(titleRow)
+
+        headByline = Ui.text(this, "", 12f, 0xB3FFFFFF.toInt(), false, 1).apply {
+            setPadding(dp(4), 0, 0, 0)
+        }
+        column.addView(headByline)
+
+        val metaRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(10), 0, 0)
+        }
+        headMeta = Ui.text(this, "", 11f, 0x99FFFFFF.toInt(), false, 1)
+        metaRow.addView(headMeta)
+        metaRow.addView(Ui.spacer(this))
+        headPct = Ui.text(this, "", 11f, c(R.color.orange), true, 1)
+        metaRow.addView(headPct)
+        column.addView(metaRow)
+
+        headProgress = ProgressLine(this, 3f, 0x4DFFFFFF, c(R.color.orange)).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(3)
+            ).apply { topMargin = dp(9) }
+        }
+        column.addView(headProgress)
+        header.addView(column)
+        root.addView(header)
+
+        // 内容区：白色圆角上翻，压住头部底边
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = topRoundBg(c(R.color.bg), 18f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ).apply { topMargin = -dp(18) }
+        }
+
+        val dirRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(10), dp(10))
+        }
+        val dirTitle = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            setOnClickListener { openSheet() }
+        }
+        dirTitle.addView(Ui.text(this, "课程目录", 18f, c(R.color.text), true, 1))
+        dirTitle.addView(Ui.icon(this, R.drawable.ic_chevron_down, c(R.color.text_dim), 16).apply {
+            (layoutParams as? LinearLayout.LayoutParams)?.marginStart = dp(6)
+        })
+        dirRow.addView(dirTitle, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        dirRow.addView(Ui.spacer(this))
+        val sortPill = Ui.pill(this, "正序", R.drawable.ic_sort) { toggleSort() }
+        sortLabel = sortPill.tag as TextView
+        dirRow.addView(sortPill)
+        dirRow.addView(Ui.icon(this, R.drawable.ic_filter, c(R.color.text_dim), 18, "筛选讲次") {
+            showFilter()
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(4) })
+        content.addView(dirRow)
+
+        val listFrame = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        scroll = ScrollView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(listBox)
+        listFrame.addView(scroll)
+
+        fab = Ui.text(this, "回到上次学习", 12f, c(R.color.orange), true, 1).apply {
+            setPadding(dp(15), dp(10), dp(15), dp(10))
+            background = Ui.roundBg(this@DetailActivity, c(R.color.surface), 20f, c(R.color.line), 1f)
+            elevation = dp(4).toFloat()
+            isClickable = true
+            setOnClickListener { continueReading() }
+        }
+        listFrame.addView(fab, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.END or Gravity.BOTTOM
+        ).apply { marginEnd = dp(16); bottomMargin = dp(18) })
+        content.addView(listFrame)
+
+        root.addView(content)
+        mini = MiniPlayer(this).apply { attach() }
+        root.addView(mini, MiniPlayer.layoutParams(this))
+        setContentView(root)
+    }
+
+    private fun topRoundBg(color: Int, radiusDp: Float): GradientDrawable {
+        val r = dp(radiusDp).toFloat()
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            setColor(color)
+        }
+    }
+
+    // ------------------------------------------------------------ 数据
     private fun showLoading() {
-        body.removeAllViews()
-        body.addView(Ui.emptyState(this, "正在加载课程…"))
+        listBox.removeAllViews()
+        rows.clear()
+        listBox.addView(Skeleton.syllabus(this))
     }
 
     private fun load(silent: Boolean) {
@@ -125,8 +279,6 @@ class DetailActivity : AppCompatActivity() {
             try {
                 val data = api.course(courseId)
                 withContext(Dispatchers.Main) {
-                    detail = data
-                    topTitle.text = data.name
                     render(data)
                 }
             } catch (e: AuthExpired) {
@@ -138,8 +290,9 @@ class DetailActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     if (detail == null) {
-                        body.removeAllViews()
-                        body.addView(Ui.emptyState(this@DetailActivity, "加载失败：${e.message}", "重试") {
+                        listBox.removeAllViews()
+                        rows.clear()
+                        listBox.addView(Ui.emptyState(this@DetailActivity, "加载失败：${e.message}", "重试") {
                             load(false)
                         })
                     } else {
@@ -151,123 +304,125 @@ class DetailActivity : AppCompatActivity() {
     }
 
     private fun render(data: CourseDetail) {
-        rowMarks.clear()
-        playingIdx = -1
-        body.removeAllViews()
-        body.addView(header(data))
-        body.addView(chapterList(data))
-        body.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(1, dp(24))
-        })
-        syncPlaying(PlayerController.state())
-        if (restoreScroll >= 0) {
+        val first = detail == null
+        detail = data
+        headName.text = data.name
+        val byline = listOf(data.author, data.identity).filter { it.isNotBlank() }.joinToString("  ·  ")
+        headByline.text = byline
+        headByline.visibility = if (byline.isEmpty()) View.GONE else View.VISIBLE
+        headMeta.text = "共 ${data.total} 讲"
+        headPct.text = when {
+            data.read > 0 -> "已学完 ${data.pct}%"
+            else -> "未开始学习"
+        }
+        headProgress.pct = data.pct.toFloat()
+        if (data.badge.isNotEmpty()) {
+            badgeView.text = data.badge
+            badgeView.visibility = View.VISIBLE
+        } else {
+            badgeView.visibility = View.GONE
+        }
+        coverBg.load(data.coverUrl, data.name)
+        fab.text = fabLabel(data)
+        renderChapters()
+        // 首次进入：骨架 → 真实目录，淡入而不是硬切；刷新（onResume 回来）不再重播
+        if (first) Ui.fadeInUp(scroll, 0, offsetDp = 8)
+        if (first && restoreScroll >= 0) {
             val target = restoreScroll
             restoreScroll = -1
             scroll.post { scroll.scrollTo(0, target) }
         }
     }
 
-    private fun syncPlaying(state: PlayState) {
-        highlightPlaying(if (state.hasItem && state.courseId == courseId) state.lessonIdx else -1)
+    private fun fabLabel(data: CourseDetail): String {
+        val target = continueLesson(data) ?: return "从头开始"
+        return when {
+            data.last != null && data.last.lesson == target.idx -> "回到上次学习"
+            target.read -> "从头开始"
+            else -> "继续学习"
+        }
     }
 
-    private fun header(data: CourseDetail): LinearLayout {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(14))
-            background = Ui.roundBg(this@DetailActivity, Ui.orangeSoft(this@DetailActivity, 0x0F), 0f)
+    private fun renderChapters() {
+        val data = detail ?: return
+        rows.clear()
+        playingIdx = -1
+        listBox.removeAllViews()
+        val chapters = if (sortDesc) data.chapters.reversed() else data.chapters
+        var shown = 0
+        for (chapter in chapters) {
+            val items = chapter.items.filter { matchFilter(it) }
+            if (items.isEmpty()) continue
+            shown += items.size
+            val open = !collapsed.contains(chapter)
+            listBox.addView(Syllabus.chapterBar(this, chapter.name, items.size, open) {
+                if (open) collapsed.add(chapter) else collapsed.remove(chapter)
+                renderChapters()
+            })
+            if (!open) continue
+            for (item in items) {
+                val row = LessonRowView(
+                    this, item,
+                    onPlay = { playAudio(item) },
+                    onClick = { openReader(item.idx) }
+                )
+                rows[item.idx] = row
+                listBox.addView(row)
+            }
         }
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-        }
-        top.addView(CoverView(this, 96, 130, 10f).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(96), dp(130))
-            load(data.coverUrl, data.name)
-        })
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(2), 0, 0)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val tagsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(4) }
-        }
-        if (data.badge.isNotEmpty()) {
-            tagsRow.addView(Ui.tag(this, data.badge).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(4) }
+        if (shown == 0) {
+            listBox.addView(Ui.emptyState(this, "没有符合条件的讲次"))
+        } else {
+            listBox.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(1, dp(76))
             })
         }
-        if (data.videoCourse) tagsRow.addView(Ui.videoTag(this))
-        if (tagsRow.childCount > 0) col.addView(tagsRow)
-        col.addView(Ui.text(this, data.name, 21f, c(R.color.text), true, 2))
-        val byline = listOf(data.author, data.identity).filter { it.isNotBlank() }.joinToString(" · ")
-        if (byline.isNotEmpty()) {
-            col.addView(Ui.text(this, byline, 12f, c(R.color.text_dim), false, 2).apply {
-                setPadding(0, dp(6), 0, 0)
-            })
-        }
-        val meta = buildString {
-            append(data.total).append(" 讲")
-            if (data.learners.isNotBlank()) append(" · ").append(data.learners)
-        }
-        col.addView(Ui.text(this, meta, 12f, c(R.color.text_dim), false, 1).apply {
-            setPadding(0, dp(4), 0, 0)
-        })
-        val progressRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(10), 0, 0)
-        }
-        progressText = Ui.text(this, if (data.read > 0) "已学完 ${data.pct}%" else "未开始",
-            12f, c(R.color.orange), true, 1)
-        progressLine = ProgressLine(this, 4f).apply {
-            layoutParams = LinearLayout.LayoutParams(0, dp(4), 1f).apply { marginStart = dp(8) }
-            pct = data.pct.toFloat()
-        }
-        progressRow.addView(progressText)
-        progressRow.addView(progressLine)
-        col.addView(progressRow)
-        top.addView(col)
-        box.addView(top)
+        syncPlaying(PlayerController.state(), force = true)
+    }
 
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(14), 0, 0)
+    private fun matchFilter(item: LessonItem): Boolean = when (filter) {
+        1 -> !item.read
+        2 -> item.read
+        else -> true
+    }
+
+    private fun toggleSort() {
+        sortDesc = !sortDesc
+        sortLabel.text = if (sortDesc) "倒序" else "正序"
+        renderChapters()
+    }
+
+    private fun showFilter() {
+        val labels = arrayOf("全部讲次", "只看未学完", "只看已学完")
+        AlertDialog.Builder(this)
+            .setTitle("筛选讲次")
+            .setSingleChoiceItems(labels, filter) { dialog, which ->
+                filter = which
+                dialog.dismiss()
+                renderChapters()
+            }
+            .show()
+    }
+
+    private fun openSheet() {
+        val data = detail ?: return
+        val current = PlayerController.state().let {
+            if (it.hasItem && it.courseId == courseId) it.lessonIdx else -1
         }
-        val target = continueLesson(data)
-        continueButton = Ui.primaryButton(
-            this,
-            if (target != null) "继续学习 · ${target.label}" else "开始学习"
-        ) {
-            val item = continueLesson(detail ?: return@primaryButton) ?: return@primaryButton
+        CourseSheet.show(this, courseId, data.name, current) { item ->
             openReader(item.idx)
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginEnd = dp(10) }
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(12), 0, dp(12), 0)
         }
-        val fromStart = Ui.secondaryButton(this, "从头开始") {
-            val first = (detail ?: return@secondaryButton).lessons.firstOrNull() ?: return@secondaryButton
-            openReader(first.idx)
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(dp(104), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        buttons.addView(continueButton)
-        buttons.addView(fromStart)
-        box.addView(buttons)
-        return box
     }
 
+    private fun syncPlaying(state: PlayState, force: Boolean = false) {
+        val idx = if (state.hasItem && state.courseId == courseId) state.lessonIdx else -1
+        if (!force && idx == playingIdx) return
+        rows[playingIdx]?.active = false
+        playingIdx = idx
+        rows[idx]?.active = true
+    }
+
+    // ------------------------------------------------------------ 讲次操作
     private fun continueLesson(data: CourseDetail): LessonItem? {
         val last = data.last?.lesson
         if (last != null) {
@@ -277,142 +432,10 @@ class DetailActivity : AppCompatActivity() {
         return data.lessons.firstOrNull { !it.read } ?: data.lessons.firstOrNull()
     }
 
-    private fun chapterList(data: CourseDetail): LinearLayout {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val head = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(6), dp(16), dp(6))
-        }
-        head.addView(Ui.text(this, "课程目录（${data.total}）", 16f, c(R.color.text), true, 1).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        box.addView(head)
-
-        if (expanded.isEmpty() && data.chapters.isNotEmpty()) expanded.add(0)
-        for ((index, chapter) in data.chapters.withIndex()) {
-            val open = expanded.contains(index)
-            val rowsBox = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                visibility = if (open) View.VISIBLE else View.GONE
-            }
-            var filled = false
-            fun fill() {
-                if (filled) return
-                filled = true
-                for (item in chapter.items) rowsBox.addView(lessonRow(item))
-                highlightPlaying(playingIdx, force = true)
-            }
-            val chevron = Ui.icon(
-                this,
-                if (open) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right,
-                c(R.color.text_dim), 16
-            )
-            val header = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(16), dp(10), dp(16), dp(10))
-                background = Ui.roundBg(this@DetailActivity, c(R.color.surface_alt), 0f)
-                isClickable = true
-                // 只开合这一章的容器，别整页重绘（会重新拉封面、丢滚动位置）
-                setOnClickListener {
-                    val nowOpen = !expanded.contains(index)
-                    if (nowOpen) {
-                        expanded.add(index)
-                        fill()
-                        rowsBox.visibility = View.VISIBLE
-                    } else {
-                        expanded.remove(index)
-                        rowsBox.visibility = View.GONE
-                    }
-                    chevron.setImageResource(
-                        if (nowOpen) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right
-                    )
-                }
-            }
-            header.addView(Ui.text(this, chapter.name, 13f, c(R.color.text), true, 1).apply {
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            header.addView(Ui.text(this, "${chapter.items.size} 讲", 12f, c(R.color.text_dim), false, 1).apply {
-                setPadding(0, 0, dp(6), 0)
-            })
-            header.addView(chevron)
-            box.addView(header)
-            box.addView(rowsBox)
-            if (open) fill()
-        }
-        return box
-    }
-
-    /** 播放中的讲次高亮：换讲时只改两行，不重绘目录。 */
-    private fun highlightPlaying(idx: Int, force: Boolean = false) {
-        if (!force && idx == playingIdx) return
-        rowMarks[playingIdx]?.let { (row, mark) ->
-            row.background = null
-            mark.visibility = View.GONE
-        }
-        playingIdx = idx
-        rowMarks[idx]?.let { (row, mark) ->
-            row.background = Ui.roundBg(this, Ui.orangeSoft(this, 0x0F), 0f)
-            mark.visibility = View.VISIBLE
-        }
-    }
-
-    private fun lessonRow(item: LessonItem): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(11), dp(12), dp(11))
-            isClickable = true
-            setOnClickListener { openReader(item.idx) }
-        }
-        val mark = View(this).apply {
-            setBackgroundColor(Ui.orange(this@DetailActivity))
-            layoutParams = LinearLayout.LayoutParams(dp(3), dp(26)).apply { marginEnd = dp(8) }
-            visibility = View.GONE
-        }
-        row.addView(mark)
-        rowMarks[item.idx] = row to mark
-        row.addView(Ui.text(this, "%02d".format(item.idx), 12f, c(R.color.text_dim), false, 1).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.WRAP_CONTENT)
-        })
-        row.addView(Ui.text(this, item.label, 14f, c(R.color.text), false, 2).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        if (item.dur.isNotBlank()) {
-            row.addView(Ui.text(this, item.dur, 11f, c(R.color.text_dim), false, 1).apply {
-                setPadding(dp(6), 0, dp(6), 0)
-            })
-        }
-        if (item.hasAudio) {
-            row.addView(Ui.icon(this, R.drawable.ic_headphone, c(R.color.text_dim), 15, "播放 ${item.label}") {
-                playAudio(item)
-            })
-        }
-        if (item.hasPdf && item.pdfUrl.isNotEmpty()) {
-            row.addView(Ui.icon(this, R.drawable.ic_pdf, c(R.color.text_dim), 15, "查看 ${item.label} 的 PDF 原稿") {
-                Pdf.open(this@DetailActivity, item.pdfUrl)
-            })
-        }
-        val status = when {
-            item.read -> "已学完"
-            item.pct > 0 -> "已学${item.pct.toInt()}%"
-            else -> "未开始"
-        }
-        row.addView(Ui.text(
-            this, status, 11f,
-            when {
-                item.read -> c(R.color.green)
-                item.pct > 0 -> c(R.color.orange)
-                else -> c(R.color.text_dim)
-            },
-            item.read || item.pct > 0, 1
-        ).apply {
-            gravity = Gravity.END
-            setPadding(dp(8), 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT)
-        })
-        return row
+    private fun continueReading() {
+        val data = detail ?: return
+        val item = continueLesson(data) ?: return
+        openReader(item.idx)
     }
 
     private fun playAudio(item: LessonItem) {
@@ -423,7 +446,6 @@ class DetailActivity : AppCompatActivity() {
         }
         val index = queue.indexOfFirst { it.idx == item.idx }.coerceAtLeast(0)
         PlayerController.play(this, queue, index)
-        openReader(item.idx)
     }
 
     private fun openReader(idx: Int) {

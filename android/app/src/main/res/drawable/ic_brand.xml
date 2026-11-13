@@ -1,0 +1,52 @@
+<!-- 极客听书 品牌 mark：深墨蓝圆角砖 + 薄荷绿三段声波（书页化声波）+ 珊瑚橙凝聚点 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp"
+    android:height="72dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- 圆角砖底（呼应 Adaptive Icon 安全区，居中留 2dp 边距防裁切） -->
+    <rect
+        android:x="2"
+        android:y="2"
+        android:width="44"
+        android:height="44"
+        android:rx="11"
+        android:fillColor="@color/brand_navy" />
+    <!-- 书页基线（淡薄荷，暗示「书」） -->
+    <rect
+        android:x="14"
+        android:y="34"
+        android:width="20"
+        android:height="3"
+        android:rx="1.5"
+        android:fillColor="@color/brand_mint"
+        android:fillAlpha="0.45" />
+    <!-- 三段向上声波条（听书 / 播放） -->
+    <rect
+        android:x="15"
+        android:y="25"
+        android:width="4"
+        android:height="9"
+        android:rx="2"
+        android:fillColor="@color/brand_mint" />
+    <rect
+        android:x="22"
+        android:y="18"
+        android:width="4"
+        android:height="16"
+        android:rx="2"
+        android:fillColor="@color/brand_mint" />
+    <rect
+        android:x="29"
+        android:y="22"
+        android:width="4"
+        android:height="12"
+        android:rx="2"
+        android:fillColor="@color/brand_mint" />
+    <!-- 珊瑚橙凝聚点（与加载动画的水滴源点呼应） -->
+    <circle
+        android:cx="24"
+        android:cy="12"
+        android:r="2.2"
+        android:fillColor="@color/brand_coral" />
+</vector>

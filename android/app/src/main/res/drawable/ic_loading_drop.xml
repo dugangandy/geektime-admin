@@ -1,0 +1,38 @@
+<!-- 水滴加载：静态矢量骨架，供 avd_loading_drop 引用 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- 涟漪：baseline 处的圆环，初始缩放 0 + 透明，由动画驱动 -->
+    <group
+        android:name="ripple"
+        android:pivotX="24"
+        android:pivotY="36"
+        android:scaleX="0"
+        android:scaleY="0"
+        android:alpha="0">
+        <path
+            android:name="ripple_path"
+            android:strokeColor="@color/brand_mint"
+            android:strokeWidth="2"
+            android:fillColor="@android:color/transparent"
+            android:pathData="M16,36 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    </group>
+    <!-- 水滴：顶部凝聚后下落，初始在顶部 -->
+    <group
+        android:name="drop"
+        android:translateX="0"
+        android:translateY="0"
+        android:alpha="1">
+        <path
+            android:name="drop_path"
+            android:fillColor="@color/brand_mint"
+            android:pathData="M24,4 C20,11 17,13 17,15 a7,7 0 1,0 14,0 C31,13 28,11 24,4 Z" />
+        <!-- 珊瑚橙点睛：凝聚点 -->
+        <path
+            android:name="accent"
+            android:fillColor="@color/brand_coral"
+            android:pathData="M23.2,5.2 a0.8,0.8 0 1,0 1.6,0 a0.8,0.8 0 1,0 -1.6,0" />
+    </group>
+</vector>

@@ -32,6 +32,36 @@ class Prefs(ctx: Context) {
         get() = sp.getFloat("speed", 1f)
         set(value) = sp.edit().putFloat("speed", value).apply()
 
+    /** 上次用的定时分钟数，定时弹窗的「上次定时」行展示。 */
+    var sleepMinutes: Int
+        get() = sp.getInt("sleep_min", 15)
+        set(value) = sp.edit().putInt("sleep_min", value).apply()
+
+    /** 定时到点后是否等本集播完再停。 */
+    var sleepFinishEpisode: Boolean
+        get() = sp.getBoolean("sleep_finish", false)
+        set(value) = sp.edit().putBoolean("sleep_finish", value).apply()
+
+    /** 收藏的讲次，key 为「课程 id|讲次序号」。只存本机，不走服务端。 */
+    fun isFavorite(key: String): Boolean =
+        sp.getStringSet("favs", null)?.contains(key) == true
+
+    /** 切换收藏，返回切换后是否已收藏。 */
+    fun toggleFavorite(key: String): Boolean {
+        val set = (sp.getStringSet("favs", null) ?: emptySet()).toMutableSet()
+        val added = if (set.contains(key)) {
+            set.remove(key)
+            false
+        } else {
+            set.add(key)
+            true
+        }
+        sp.edit().putStringSet("favs", set).apply()
+        return added
+    }
+
+    fun favorites(): Set<String> = sp.getStringSet("favs", null) ?: emptySet()
+
     val deviceId: String
         get() {
             val existing = sp.getString("device", null)
@@ -42,7 +72,7 @@ class Prefs(ctx: Context) {
         }
 
     companion object {
-        const val DEFAULT_SERVER = "http://139.198.29.121:8888"
+        const val DEFAULT_SERVER = "http://139.198.29.121:8878"
         const val LAN_HINT = "http://192.168.1.8:8888"
     }
 }

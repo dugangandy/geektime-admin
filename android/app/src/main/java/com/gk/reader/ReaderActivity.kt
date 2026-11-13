@@ -62,11 +62,12 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var videoBar: LinearLayout
     private lateinit var videoSub: TextView
     private lateinit var audioBar: LinearLayout
+    private lateinit var audioCover: CoverView
     private lateinit var audioTitle: TextView
     private lateinit var audioSub: TextView
     private lateinit var audioToggle: android.widget.ImageView
-    private lateinit var audioSeek: SeekBar
-    private lateinit var audioTime: TextView
+    private lateinit var audioSeek: SlidingSeek
+    private var lastAudioCover = ""
     private lateinit var loading: ProgressBar
 
     private var courseId = ""
@@ -82,7 +83,6 @@ class ReaderActivity : AppCompatActivity() {
     private var restorePos = -1
     private var lastReport = 0L
     private var completedShown = false
-    private var draggingSeek = false
     private var observer: ((PlayState) -> Unit)? = null
     private var detailCache: CourseDetail? = null
     /** 每次提交新文档 +1；onPageFinished 记下就绪的那一代，防止旧页滚动报到新讲次上。 */
@@ -287,6 +287,10 @@ class ReaderActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * 底栏播放器：与列表页 MiniPlayer 同一套样式（封面 + 标题/副标题 + 播放 + 关闭），
+     * 进度条放在播放条上方，手感与全屏播放页一致。
+     */
     private fun buildAudioBar(): LinearLayout {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -296,52 +300,49 @@ class ReaderActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
+        audioSeek = SlidingSeek(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(18)
+            ).apply { marginStart = dp(10); marginEnd = dp(10) }
+            onSeek = { ratio ->
+                val s = PlayerController.state()
+                if (s.hasItem && s.durationMs > 0) {
+                    PlayerController.seekTo((s.durationMs * ratio).toLong())
+                }
+            }
+        }
+        box.addView(audioSeek)
         box.addView(View(this).apply {
             setBackgroundColor(c(R.color.line))
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
         })
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(14), 0)
-        }
-        audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 26, "播放讲述") { toggleAudio() }
-        row.addView(audioToggle)
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), 0, dp(8), 0)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(dp(12), dp(6), dp(4), dp(6))
+            minimumHeight = dp(56)
             isClickable = true
             setOnClickListener { openPlayer() }
+        }
+        audioCover = CoverView(this, 34, 34, 6f)
+        row.addView(audioCover)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(6), 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         audioTitle = Ui.text(this, "讲述", 13f, c(R.color.text), true, 1)
         audioSub = Ui.text(this, "", 11f, c(R.color.text_dim), false, 1)
         col.addView(audioTitle)
         col.addView(audioSub)
         row.addView(col)
-        audioTime = Ui.text(this, "00:00 / 00:00", 11f, c(R.color.text_dim), false, 1)
-        row.addView(audioTime)
+        audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 22, "播放讲述") { toggleAudio() }
+        row.addView(audioToggle)
+        row.addView(Ui.icon(this, R.drawable.ic_close, c(R.color.text_dim), 18, "停止播放") {
+            PlayerController.stopPlayback()
+        })
         box.addView(row)
-
-        audioSeek = SeekBar(this).apply {
-            max = 1000
-            progress = 0
-            setPadding(dp(12), 0, dp(12), 0)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {}
-                override fun onStartTrackingTouch(bar: SeekBar?) { draggingSeek = true }
-                override fun onStopTrackingTouch(bar: SeekBar?) {
-                    draggingSeek = false
-                    val s = PlayerController.state()
-                    if (s.hasItem && s.durationMs > 0) {
-                        PlayerController.seekTo(s.durationMs * (bar?.progress ?: 0) / 1000)
-                    }
-                }
-            })
-        }
-        box.addView(audioSeek, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(30)
-        ))
         return box
     }
 
@@ -395,9 +396,13 @@ class ReaderActivity : AppCompatActivity() {
                     videoBar.visibility = if (data.videoUrl.isNotEmpty()) View.VISIBLE else View.GONE
                     videoSub.text = listOf(data.course, data.duration)
                         .filter { it.isNotBlank() }.joinToString(" · ")
-                    audioTitle.text = "讲述 ${data.author.ifEmpty { data.course }}"
-                    audioSub.text = data.title
-                    audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"
+                    audioTitle.text = data.title.ifEmpty { "讲述" }
+                    audioSub.text = listOf("讲述", data.duration)
+                        .filter { it.isNotBlank() }.joinToString(" · ")
+                    if (data.coverUrl.isNotEmpty() && data.coverUrl != lastAudioCover) {
+                        lastAudioCover = data.coverUrl
+                        audioCover.load(data.coverUrl, data.course.ifEmpty { data.title })
+                    }
                     setAudioIcon(false)
                     docGen++
                     web.loadDataWithBaseURL(base, html, "text/html", "utf-8", base)
@@ -643,17 +648,28 @@ $override</style>
         if (mine) {
             setAudioIcon(state.playing)
             val dur = if (state.durationMs > 0) state.durationMs else durationMsOf(data)
-            audioTime.text = "${Ui.formatMs(state.positionMs)} / ${Ui.formatMs(dur)}"
-            if (!draggingSeek) {
-                audioSeek.progress = if (dur > 0) {
-                    (state.positionMs * 1000 / dur).toInt().coerceIn(0, 1000)
-                } else 0
+            audioTitle.text = state.title.ifEmpty { data.title }
+            audioSub.text = when {
+                state.buffering -> "缓冲中… · ${state.course}"
+                else -> buildString {
+                    append(state.course.ifEmpty { data.course })
+                    if (dur > 0) {
+                        append("  ").append(Ui.formatMs(state.positionMs))
+                            .append(" / ").append(Ui.formatMs(dur))
+                    }
+                }
             }
-            audioSub.text = if (state.buffering) "缓冲中…" else data.title
+            audioSeek.ratio = if (dur > 0) state.positionMs.toFloat() / dur else 0f
+            if (state.coverUrl.isNotEmpty() && state.coverUrl != lastAudioCover) {
+                lastAudioCover = state.coverUrl
+                audioCover.load(state.coverUrl, state.course.ifEmpty { data.title })
+            }
         } else {
             setAudioIcon(false)
-            if (!draggingSeek) audioSeek.progress = 0
-            audioTime.text = "00:00 / ${Ui.formatMs(durationMsOf(data))}"
+            audioSeek.ratio = 0f
+            audioTitle.text = data.title.ifEmpty { "讲述" }
+            audioSub.text = listOf("讲述", data.duration)
+                .filter { it.isNotBlank() }.joinToString(" · ")
         }
     }
 

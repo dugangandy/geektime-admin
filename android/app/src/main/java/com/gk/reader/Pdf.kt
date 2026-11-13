@@ -37,7 +37,13 @@ object Pdf {
 
     fun cached(ctx: android.content.Context, url: String): File? {
         val f = File(dir(ctx), Covers.key(ctx, url) + ".pdf")
-        return if (f.length() > 0) f else null
+        if (f.length() <= 0) return null
+        // 旧版本可能把 HTML 错误页当 PDF 缓存过，命中脏缓存就丢掉重下
+        if (!looksLikePdf(f)) {
+            f.delete()
+            return null
+        }
+        return f
     }
 
     /** 下载（带 Cookie）→ FileProvider → 系统 PDF 查看器。 */
@@ -64,12 +70,13 @@ object Pdf {
 
         val app = activity.applicationContext
         val job = scope.launch {
-            val file = download(app, url)
+            val result = download(app, url)
             withContext(Dispatchers.Main) {
                 if (activity.isFinishing || activity.isDestroyed) return@withContext
                 if (dialog.isShowing) dialog.dismiss()
+                val file = result.file
                 if (file == null) {
-                    Ui.toast(activity, "PDF 下载失败，请检查网络或登录状态")
+                    Ui.toast(activity, result.error ?: "PDF 下载失败，请检查网络或登录状态")
                     return@withContext
                 }
                 view(activity, file)
@@ -87,7 +94,10 @@ object Pdf {
         })
     }
 
-    private suspend fun download(ctx: android.content.Context, url: String): File? =
+    /** 下载结果：成功带文件，失败带一句能直接展示的原因。 */
+    private class Download(val file: File?, val error: String? = null)
+
+    private suspend fun download(ctx: android.content.Context, url: String): Download =
         withContext(Dispatchers.IO) {
             val target = File(dir(ctx), Covers.key(ctx, url) + ".pdf")
             val api = (ctx.applicationContext as GkApp).api
@@ -100,25 +110,42 @@ object Pdf {
             }
         }
 
-    private fun save(call: Call, target: File): File? {
+    private fun save(call: Call, target: File): Download {
         val tmp = File(target.parentFile, target.name + "." + System.nanoTime() + ".part")
         return try {
+            var contentType = ""
             call.execute().use { res ->
-                if (!res.isSuccessful) return null
-                val body = res.body ?: return null
+                if (!res.isSuccessful) return Download(null, "PDF 下载失败：HTTP ${res.code}")
+                val body = res.body ?: return Download(null, "PDF 下载失败：响应为空")
+                contentType = body.contentType()?.toString().orEmpty()
                 body.byteStream().use { input ->
                     tmp.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
                 }
             }
-            if (tmp.length() <= 0) return null
+            if (tmp.length() <= 0) return Download(null, "PDF 下载失败：响应为空")
+            // 登录过期 / 路径写错时服务端会回一个 HTML 页面，之前会当 PDF 存下来再交给浏览器，
+            // 表现成「点讲义跳到了网页」。这里按文件头判定，别让非 PDF 进缓存。
+            if (!looksLikePdf(tmp)) {
+                val hint = if (contentType.contains("html", true)) "登录可能已失效，请重新登录" else "服务端返回的不是 PDF"
+                return Download(null, hint)
+            }
             if (target.exists()) target.delete()
-            if (!tmp.renameTo(target)) return null
-            target
+            if (!tmp.renameTo(target)) return Download(null, "PDF 保存失败")
+            Download(target)
         } catch (_: Exception) {
-            null
+            Download(null, "PDF 下载失败，请检查网络")
         } finally {
             if (tmp.exists()) tmp.delete()
         }
+    }
+
+    private fun looksLikePdf(file: File): Boolean = try {
+        file.inputStream().use { input ->
+            val head = ByteArray(5)
+            input.read(head) == 5 && String(head, Charsets.US_ASCII) == "%PDF-"
+        }
+    } catch (_: Exception) {
+        false
     }
 
     private fun view(activity: Activity, file: File) {
