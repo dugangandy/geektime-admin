@@ -65,9 +65,12 @@
   /* ---------------------------------------------------- 片段 */
   function playerSection() {
     if (hasVideo) {
-      /* 视频讲次用浏览器原生控制条：全屏、画质、字幕都由浏览器负责 */
+      /* 视频讲次用浏览器原生控制条：全屏、画质、字幕都由浏览器负责。
+         width/height 属性给浏览器一个 metadata 之前的固有宽高比，占位盒子
+         从首屏就按 16:9 撑好；视频加载后拿到真实尺寸也不会再把下方正文顶下去。
+         article.css 里的 aspect-ratio + object-fit 是第二道保险，非 16:9 也留黑边不跳。 */
       return '<section class="player video-ph" id="player">\n' +
-        '  <div class="video-wrap"><video id="video" controls playsinline preload="metadata"></video></div>\n' +
+        '  <div class="video-wrap"><video id="video" width="16" height="9" controls playsinline preload="metadata"></video></div>\n' +
         '  <div class="player-sub">' + (D.sub || '') +
         '    <a class="video-dl" href="' + D.video + '" download>下载视频</a>\n' +
         (hasPdf ? '    <a class="video-dl" href="' + D.pdf + '" target="_blank" rel="noopener">PDF 讲稿</a>\n' : '') +

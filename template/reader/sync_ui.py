@@ -10,6 +10,7 @@
     python template/reader/sync_ui.py                 # 同步全部阅读器
     python template/reader/sync_ui.py --check         # 只检查哪些阅读器落后
     python template/reader/sync_ui.py Redis 10x       # 只同步名字含这些片段的课程
+    python template/reader/sync_ui.py --data-dir "D:/课程"  # 课程目录外置时
 """
 import argparse
 import filecmp
@@ -137,11 +138,12 @@ def sync_page_ver(reader_dir, vers, dry=False):
     return changed
 
 
-def find_readers(filters):
-    """返回 [(课程名, reader 目录)]。"""
+def find_readers(filters, data_dir=None):
+    """返回 [(课程名, reader 目录)]；课程目录外置时按 --data-dir 查找。"""
     out = []
-    for name in sorted(os.listdir(ROOT)):
-        r = os.path.join(ROOT, name, 'reader')
+    base = data_dir or ROOT
+    for name in sorted(os.listdir(base)):
+        r = os.path.join(base, name, 'reader')
         if not os.path.isfile(os.path.join(r, 'data', 'catalog.js')):
             continue
         if filters and not any(f in name for f in filters):
@@ -201,6 +203,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='把模板 UI 同步到所有阅读器')
     ap.add_argument('filters', nargs='*', help='只同步名字包含这些片段的课程')
     ap.add_argument('--check', action='store_true', help='只检查，不写入')
+    ap.add_argument('--data-dir', default=os.environ.get('GK_DATA_DIR') or ROOT,
+                    help='课程数据目录，默认与仓库根相同（与 serve.py 的 --data-dir 一致）')
     args = ap.parse_args(argv)
 
     extra = unwatched_root_files()
@@ -208,7 +212,7 @@ def main(argv=None):
         print('提示：模板根目录有未列入同步清单的静态文件：%s' % ', '.join(extra))
         print('      （若是新的 UI 文件，请加进 ROOT_SYNC）')
 
-    readers = find_readers(args.filters)
+    readers = find_readers(args.filters, args.data_dir)
     if not readers:
         print('没有找到阅读器（先跑 build.py）')
         return 1

@@ -4,6 +4,7 @@
 运行：python -m unittest test_autobuild -v
 """
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -305,6 +306,51 @@ class SiteGeneratorCase(unittest.TestCase):
         out = {c["name"]: c["state"]
                for c in self.site.courses({"清单占位": "building"})}
         self.assertEqual(out["清单占位"], "building")
+
+
+class ReaderVideoPlaceholderCase(unittest.TestCase):
+    """离线阅读器内联 <video>：首屏就预留高度，loadedmetadata 后不再顶开正文。"""
+
+    def setUp(self):
+        assets = HERE / "template" / "reader" / "assets"
+        self.page_js = (assets / "page.js").read_text(encoding="utf-8")
+        self.css = (assets / "article.css").read_text(encoding="utf-8")
+
+    def test_video_markup_reserves_ratio_before_metadata(self):
+        m = re.search(r'<video id="video"[^>]*>', self.page_js)
+        self.assertIsNotNone(m, "视频讲次未生成 <video> 元素")
+        self.assertIn('width="16"', m.group(0))
+        self.assertIn('height="9"', m.group(0))
+        self.assertIn('preload="metadata"', m.group(0))
+
+    def test_css_locks_placeholder_height(self):
+        self.assertRegex(self.css,
+                         r"\.video-wrap\s*\{[^}]*aspect-ratio:\s*16\s*/\s*9")
+        self.assertRegex(self.css,
+                         r"\.video-wrap video\s*\{[^}]*object-fit:\s*contain")
+        # 绝对定位把 <video> 钉在固定盒子里，height 不再随 intrinsic ratio 变化
+        self.assertRegex(self.css,
+                         r"\.video-wrap video\s*\{[^}]*position:\s*absolute")
+
+
+class SyncUiDataDirCase(unittest.TestCase):
+    """sync_ui 的 --data-dir：课程目录外置时也能找到阅读器。"""
+
+    def test_find_readers_honors_data_dir(self):
+        import importlib.util
+        path = HERE / "template" / "reader" / "sync_ui.py"
+        spec = importlib.util.spec_from_file_location("gk_sync_ui", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        root = Path(tempfile.mkdtemp(prefix="gk-syncdir-"))
+        try:
+            d = root / "课程A" / "reader" / "data"
+            d.mkdir(parents=True)
+            (d / "catalog.js").write_text("window.COURSE={};", encoding="utf-8")
+            self.assertEqual([n for n, _ in mod.find_readers([], str(root))], ["课程A"])
+            self.assertEqual(mod.find_readers(["不存在"], str(root)), [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

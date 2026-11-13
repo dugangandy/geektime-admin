@@ -306,15 +306,24 @@ body.article-page::-webkit-scrollbar-thumb:hover { background: #c6c6c6; }
   background: none;
 }
 .video-wrap {
+  position: relative;
+  /* 首屏就按 16:9 预留高度：loadedmetadata 拿到真实尺寸后盒子不再变高 */
+  aspect-ratio: 16 / 9;
+  max-height: 70vh;
   background: #000;
   border-radius: 4px;
   overflow: hidden;
   line-height: 0;
 }
 .video-wrap video {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
   width: 100%;
-  max-height: 70vh;
+  height: 100%;
+  /* 非 16:9 视频留黑边填充，而不是改变外层占位高度 */
+  object-fit: contain;
   background: #000;
 }
 .player.video-ph .player-sub { margin-top: 10px; }
