@@ -17,11 +17,13 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +60,7 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var titleText: TextView
     private lateinit var metaText: TextView
     private lateinit var progressLine: ProgressLine
+    private lateinit var moreBtn: ImageView
     private lateinit var videoBar: LinearLayout
     private lateinit var videoSub: TextView
     private lateinit var audioBar: LinearLayout
@@ -67,7 +70,7 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var audioToggle: android.widget.ImageView
     private lateinit var audioSeek: SlidingSeek
     private var lastAudioCover = ""
-    private lateinit var loading: DropLoadingView
+    private lateinit var loading: WaveLoadingView
 
     private var courseId = ""
     private var idx = 0
@@ -172,7 +175,9 @@ class ReaderActivity : AppCompatActivity() {
             contentDescription = "字号与排版"
             setOnClickListener { showTextDialog() }
         })
-        bar.addView(Ui.icon(this, R.drawable.ic_more, c(R.color.text), 22, "更多") { showMore() })
+        // 弹出菜单要锚定在这个图标上，所以留个引用
+        moreBtn = Ui.icon(this, R.drawable.ic_more, c(R.color.text), 22, "更多") { showMore() }
+        bar.addView(moreBtn)
         root.addView(bar)
 
         progressLine = ProgressLine(this, 2f).apply {
@@ -228,7 +233,7 @@ class ReaderActivity : AppCompatActivity() {
         frame.addView(web, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        loading = DropLoadingView(this).apply {
+        loading = WaveLoadingView(this).apply {
             layoutParams = FrameLayout.LayoutParams(dp(48), dp(48)).apply { gravity = Gravity.CENTER }
         }
         frame.addView(loading)
@@ -287,7 +292,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * 底栏播放器：与列表页 MiniPlayer 同一套样式（封面 + 标题/副标题 + 播放 + 关闭），
+     * 底栏播放器：与列表页 MiniPlayer 同一套样式（封面 + 标题/副标题 + 播放 + 停止 + 目录），
      * 进度条放在播放条上方，手感与全屏播放页一致。
      */
     private fun buildAudioBar(): LinearLayout {
@@ -338,11 +343,24 @@ class ReaderActivity : AppCompatActivity() {
         row.addView(col)
         audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 22, "播放讲述") { toggleAudio() }
         row.addView(audioToggle)
-        row.addView(Ui.icon(this, R.drawable.ic_close, c(R.color.text_dim), 18, "停止播放") {
+        row.addView(Ui.icon(this, R.drawable.ic_stop, c(R.color.text_dim), 20, "停止播放") {
             PlayerController.stopPlayback()
+        })
+        row.addView(Ui.icon(this, R.drawable.ic_queue, c(R.color.text_dim), 20, "课程目录") {
+            openCourseSheet()
         })
         box.addView(row)
         return box
+    }
+
+    /** 底栏目录：选一讲就换成那一讲的正文（旧页退出时 onStop 已上报进度）。 */
+    private fun openCourseSheet() {
+        if (courseId.isEmpty()) return
+        CourseSheet.show(this, courseId, courseName, idx) { item ->
+            if (item.idx == idx) return@show
+            ReaderActivity.open(this, courseId, item.idx, courseName, item.label)
+            finish()
+        }
     }
 
     // ------------------------------------------------------------ 数据
@@ -775,12 +793,15 @@ $override</style>
             restorePos = web.scrollOffset()
             loadLesson(true)
         }
-        AlertDialog.Builder(this)
-            .setItems(labels.toTypedArray()) { dialog, which ->
-                dialog.dismiss()
-                actions[which]()
-            }
-            .show()
+        // 贴着「更多」图标直接展开菜单，不再盖一层对话框
+        val popup = PopupMenu(this, moreBtn)
+        popup.gravity = Gravity.END
+        labels.forEachIndexed { index, label -> popup.menu.add(0, index, index, label) }
+        popup.setOnMenuItemClickListener { item ->
+            actions.getOrNull(item.itemId)?.invoke()
+            true
+        }
+        popup.show()
     }
 }
 

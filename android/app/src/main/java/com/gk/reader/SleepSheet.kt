@@ -65,9 +65,8 @@ class SleepSheet private constructor(
         box.addView(titleRow)
 
         box.addView(timeCard(), cardParams(topMargin = 6))
-        box.addView(startRow(), cardParams(topMargin = 12))
         box.addView(View(host).apply {
-            layoutParams = LinearLayout.LayoutParams(1, host.dp(20))
+            layoutParams = LinearLayout.LayoutParams(1, host.dp(24))
         })
 
         dialog = BottomSheetDialog(host).apply {
@@ -132,34 +131,51 @@ class SleepSheet private constructor(
         timeHead.addView(finishToggle())
         card.addView(timeHead)
 
-        val timeRow = FlowBox(host, host.dp(10), host.dp(10)).apply {
-            setPadding(host.dp(16), host.dp(10), host.dp(16), 0)
-        }
-        timeChips = intArrayOf(15, 30, 60, 90).map { minutes ->
-            val view = chip("${minutes}分") { pickMinutes(minutes) }
-            timeRow.addView(view)
-            minutes to view
-        } + (0 to chip("自定义") { askCustom() }.also { timeRow.addView(it) })
-        card.addView(timeRow)
+        timeChips = addChipRow(
+            parent = card,
+            items = listOf(15 to "15分", 30 to "30分", 60 to "60分", 90 to "90分", 0 to "自定义"),
+            topPad = 10,
+            bottomPad = 0
+        ) { value -> if (value == 0) askCustom() else pickMinutes(value) }
 
         card.addView(Ui.text(host, "按集数", 13f, host.c(R.color.text_dim), false, 1).apply {
             setPadding(host.dp(16), host.dp(16), host.dp(16), 0)
         })
 
-        val episodeRow = FlowBox(host, host.dp(10), host.dp(10)).apply {
-            setPadding(host.dp(16), host.dp(10), host.dp(16), host.dp(16))
+        episodeChips = addChipRow(
+            parent = card,
+            items = listOf(1 to "播完本集", 2 to "播完2集", 3 to "播完3集", 5 to "播完5集"),
+            topPad = 10,
+            bottomPad = 16
+        ) { count ->
+            PlayerController.setSleepEpisodes(count)
+            onChanged()
+            dialog.dismiss()
         }
-        episodeChips = intArrayOf(1, 2, 3, 5).map { count ->
-            val view = chip(if (count == 1) "播完本集" else "播完${count}集") {
-                PlayerController.setSleepEpisodes(count)
-                onChanged()
-                dialog.dismiss()
-            }
-            episodeRow.addView(view)
-            count to view
-        }
-        card.addView(episodeRow)
         return card
+    }
+
+    /** 一行等宽胶囊：按权重平分宽度，任何屏宽都不会换行。 */
+    private fun addChipRow(
+        parent: LinearLayout,
+        items: List<Pair<Int, String>>,
+        topPad: Int,
+        bottomPad: Int,
+        onPick: (Int) -> Unit
+    ): List<Pair<Int, TextView>> {
+        val row = LinearLayout(host).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(host.dp(16), host.dp(topPad), host.dp(16), host.dp(bottomPad))
+        }
+        val views = items.mapIndexed { index, (value, label) ->
+            val view = chip(label) { onPick(value) }
+            row.addView(view, LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { if (index > 0) marginStart = host.dp(8) })
+            value to view
+        }
+        parent.addView(row)
+        return views
     }
 
     /** 「播完整集声音再停止」：到点后不切断正在讲的这集。 */
@@ -192,24 +208,6 @@ class SleepSheet private constructor(
         row.addView(label)
         row.contentDescription = "播完整集声音再停止"
         return row
-    }
-
-    // ------------------------------------------------------------ 卡片二：定时启播
-    private fun startRow(): LinearLayout = LinearLayout(host).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        background = Ui.roundBg(host, host.c(R.color.surface), 14f)
-        setPadding(host.dp(16), host.dp(16), host.dp(14), host.dp(16))
-        isClickable = true
-        foreground = Ui.ripple(host, Color.TRANSPARENT, 14f)
-        setOnClickListener { Ui.toast(host, "定时启播暂未支持") }
-        addView(Ui.text(host, "设置定时启播", 15f, host.c(R.color.text), false, 1))
-        addView(Ui.spacer(host))
-        addView(
-            Ui.text(host, "定时声音陪伴，告别无趣生活", 12f, host.c(R.color.text_dim), false, 1)
-                .apply { setPadding(0, 0, host.dp(2), 0) }
-        )
-        addView(Ui.icon(host, R.drawable.ic_chevron_right, host.c(R.color.text_dim), 14))
     }
 
     // ------------------------------------------------------------ 交互
@@ -284,7 +282,8 @@ class SleepSheet private constructor(
     private fun chip(label: String, onClick: () -> Unit): TextView =
         Ui.text(host, label, 13f, host.c(R.color.text), false, 1).apply {
             gravity = Gravity.CENTER
-            setPadding(host.dp(16), host.dp(9), host.dp(16), host.dp(9))
+            // 等宽排布，横向内边距只留给文字，避免把 5 个胶囊挤出屏幕
+            setPadding(host.dp(2), host.dp(9), host.dp(2), host.dp(9))
             background = Ui.roundBg(host, host.c(R.color.surface_alt), 18f)
             foreground = Ui.ripple(host, Color.TRANSPARENT, 18f)
             isClickable = true
@@ -306,64 +305,6 @@ class SleepSheet private constructor(
             shape = GradientDrawable.RECTANGLE
             cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
             setColor(color)
-        }
-    }
-}
-
-/** 简易流式布局：窄屏上胶囊自动换行，不会被裁掉。 */
-private class FlowBox(
-    context: Context,
-    private val hGap: Int,
-    private val vGap: Int
-) : ViewGroup(context) {
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val avail = (MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight)
-            .coerceAtLeast(0)
-        val childSpec = MeasureSpec.makeMeasureSpec(avail, MeasureSpec.AT_MOST)
-        var lineW = 0
-        var lineH = 0
-        var totalH = 0
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            if (child.visibility == GONE) continue
-            measureChild(child, childSpec, heightMeasureSpec)
-            val w = child.measuredWidth
-            val h = child.measuredHeight
-            if (lineW > 0 && lineW + hGap + w > avail) {
-                totalH += lineH + vGap
-                lineW = w
-                lineH = h
-            } else {
-                lineW = if (lineW == 0) w else lineW + hGap + w
-                lineH = maxOf(lineH, h)
-            }
-        }
-        totalH += lineH
-        setMeasuredDimension(
-            MeasureSpec.getSize(widthMeasureSpec),
-            totalH + paddingTop + paddingBottom
-        )
-    }
-
-    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        val avail = (r - l) - paddingLeft - paddingRight
-        var x = paddingLeft
-        var y = paddingTop
-        var lineH = 0
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            if (child.visibility == GONE) continue
-            val w = child.measuredWidth
-            val h = child.measuredHeight
-            if (x > paddingLeft && x + w > paddingLeft + avail) {
-                x = paddingLeft
-                y += lineH + vGap
-                lineH = 0
-            }
-            child.layout(x, y, x + w, y + h)
-            x += w + hGap
-            lineH = maxOf(lineH, h)
         }
     }
 }

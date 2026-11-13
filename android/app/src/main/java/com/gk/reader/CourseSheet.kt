@@ -168,7 +168,9 @@ class CourseSheet private constructor(
                 }
             )
             if (!open) continue
-            for (item in chapter.items) {
+            // 倒序时章节内的讲次也要倒着排：只反转章节顺序的话，单章节课程看起来毫无变化
+            val items = if (descending) chapter.items.sortedByDescending { it.idx } else chapter.items
+            for (item in items) {
                 val row = LessonRowView(host, item, onClick = { pick(item) }).apply {
                     active = item.idx == currentIdx
                 }

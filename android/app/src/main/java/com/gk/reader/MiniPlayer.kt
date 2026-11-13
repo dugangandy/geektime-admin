@@ -7,15 +7,24 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 
-/** 全局迷你播放条：有播放内容时出现，点开全屏播放器，× 停止并收起。 */
-class MiniPlayer(context: Context) : LinearLayout(context) {
+/**
+ * 全局迷你播放条：有播放内容时出现，点开全屏播放器。
+ * 右侧固定是「播放 / 停止」，最后一个按钮按页面决定：首页是关闭，详情页是课程目录。
+ */
+class MiniPlayer(context: Context, private val showQueue: Boolean = false) : LinearLayout(context) {
     private val cover = CoverView(context, 34, 34, 6f)
     private val title = Ui.text(context, "", 13f, context.c(R.color.text), true, 1)
     private val sub = Ui.text(context, "", 11f, context.c(R.color.text_dim), false, 1)
     private val toggle = Ui.icon(context, R.drawable.ic_play, context.c(R.color.text), 22, "播放") {
         PlayerController.toggle()
     }
-    private val close = Ui.icon(context, R.drawable.ic_close, context.c(R.color.text_dim), 18, "停止播放") {
+    private val stop = Ui.icon(context, R.drawable.ic_stop, context.c(R.color.text_dim), 20, "停止播放") {
+        PlayerController.stopPlayback()
+    }
+    private val queue = Ui.icon(context, R.drawable.ic_queue, context.c(R.color.text_dim), 20, "课程目录") {
+        openCourseSheet()
+    }
+    private val close = Ui.icon(context, R.drawable.ic_close, context.c(R.color.text_dim), 18, "关闭播放条") {
         PlayerController.stopPlayback()
     }
     private var observer: ((PlayState) -> Unit)? = null
@@ -49,7 +58,8 @@ class MiniPlayer(context: Context) : LinearLayout(context) {
         }
         row.addView(column)
         row.addView(toggle)
-        row.addView(close)
+        row.addView(stop)
+        row.addView(if (showQueue) queue else close)
         addView(row)
     }
 
@@ -89,6 +99,15 @@ class MiniPlayer(context: Context) : LinearLayout(context) {
     private fun open() {
         if (!PlayerController.state().hasItem) return
         context.startActivity(Intent(context, PlayerActivity::class.java))
+    }
+
+    /** 目录按钮：看整门课的讲次，选一讲就进那一讲的正文。 */
+    private fun openCourseSheet() {
+        val state = PlayerController.state()
+        if (!state.hasItem || state.courseId.isEmpty()) return
+        CourseSheet.show(context, state.courseId, state.course, state.lessonIdx) { item ->
+            ReaderActivity.open(context, state.courseId, item.idx, state.course, item.label)
+        }
     }
 
     override fun onDetachedFromWindow() {
