@@ -18,7 +18,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -68,7 +67,7 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var audioToggle: android.widget.ImageView
     private lateinit var audioSeek: SlidingSeek
     private var lastAudioCover = ""
-    private lateinit var loading: ProgressBar
+    private lateinit var loading: DropLoadingView
 
     private var courseId = ""
     private var idx = 0
@@ -229,8 +228,8 @@ class ReaderActivity : AppCompatActivity() {
         frame.addView(web, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        loading = ProgressBar(this).apply {
-            layoutParams = FrameLayout.LayoutParams(dp(32), dp(32)).apply { gravity = Gravity.CENTER }
+        loading = DropLoadingView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(48), dp(48)).apply { gravity = Gravity.CENTER }
         }
         frame.addView(loading)
         root.addView(frame)

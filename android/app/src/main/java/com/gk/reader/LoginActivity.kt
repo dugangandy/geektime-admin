@@ -259,23 +259,25 @@ class LoginActivity : AppCompatActivity() {
         }
         content.addView(rememberBox)
 
-        loginButton = Ui.primaryButton(this, "进 入 课 程 库") { doLogin() }.apply {
+        // 按钮 + 加载叠层：加载不占额外布局空间；busy 时隐藏按钮文字、水滴居中
+        loginButton = Ui.primaryButton(this, LOGIN_LABEL) { doLogin() }.apply {
             minimumHeight = ctx.dp(46)
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        loading = DropLoadingView(this).apply {
+            visibility = View.INVISIBLE
+            layoutParams = FrameLayout.LayoutParams(ctx.dp(30), ctx.dp(30), Gravity.CENTER)
+        }
+        val loginBox = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = ctx.dp(10) }
+            addView(loginButton)
+            addView(loading)
         }
-        content.addView(loginButton)
-
-        loading = DropLoadingView(this).apply {
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(ctx.dp(56), ctx.dp(56))
-                .apply {
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    topMargin = ctx.dp(10)
-                }
-        }
-        content.addView(loading)
+        content.addView(loginBox)
 
         content.addView(Ui.text(this, "常用地址", 12f, ctx.c(R.color.text_dim)).apply {
             setPadding(0, ctx.dp(26), 0, ctx.dp(6))
@@ -339,7 +341,11 @@ class LoginActivity : AppCompatActivity() {
         val blocked = busy || lockLeftSec() > 0
         loginButton.alpha = if (blocked) 0.55f else 1f
         loginButton.isClickable = !blocked
-        loading.visibility = if (busy) View.VISIBLE else View.GONE
+        loading.visibility = if (busy) View.VISIBLE else View.INVISIBLE
+        // busy 时清空文字，让水滴动画在按钮中央显示，避免与文字重叠
+        loginButton.text = if (busy) "" else LOGIN_LABEL
+        // 文字清了 TalkBack 就读不到内容，busy 时补一个描述
+        loginButton.contentDescription = if (busy) "登录中" else null
     }
 
     private fun testConnection() {
@@ -430,6 +436,7 @@ class LoginActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val LOGIN_LABEL = "进 入 课 程 库"
         private const val STATE_VISIBLE = "state_visible"
         private const val STATE_HINT = "state_hint"
         private const val STATE_LOCK = "state_lock"

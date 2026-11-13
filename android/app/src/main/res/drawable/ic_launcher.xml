@@ -6,23 +6,21 @@
     android:viewportHeight="108">
     <path
         android:fillColor="@color/brand_navy"
-        android:pathData="M24,4 L84,4 A20,20 0 0 1 104,24 L104,84 A20,20 0 0 1 84,104 L24,104 A20,20 0 0 1 4,84 L4,24 A20,20 0 0 1 24,4 Z" />
+        android:pathData="M24,4 H84 A20,20 0 0,1 104,24 V84 A20,20 0 0,1 84,104 H24 A20,20 0 0,1 4,84 V24 A20,20 0 0,1 24,4 Z" />
     <path
         android:fillColor="@color/brand_mint"
         android:fillAlpha="0.45"
-        android:pathData="M33,72 h42 a3,3 0 0,1 0,6 h-42 a3,3 0 0,1 0,-6 Z" />
+        android:pathData="M34.5,80 H73.5 A2.5,2.5 0 0,1 73.5,85 H34.5 A2.5,2.5 0 0,1 34.5,80 Z" />
     <path
         android:fillColor="@color/brand_mint"
-        android:pathData="M36,55 h8 a4,4 0 0,1 4,4 v10 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-10 a4,4 0 0,1 4,-4 Z" />
+        android:pathData="M35,63 a5,5 0 0,1 10,0 v8 a5,5 0 0,1 -10,0 v-8 Z" />
     <path
         android:fillColor="@color/brand_mint"
-        android:pathData="M50,42 h8 a4,4 0 0,1 4,4 v23 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-23 a4,4 0 0,1 4,-4 Z" />
+        android:pathData="M49,45 a5,5 0 0,1 10,0 v26 a5,5 0 0,1 -10,0 v-26 Z" />
     <path
         android:fillColor="@color/brand_mint"
-        android:pathData="M64,48 h8 a4,4 0 0,1 4,4 v17 a4,4 0 0,1 -4,4 h-8 a4,4 0 0,1 -4,-4 v-17 a4,4 0 0,1 4,-4 Z" />
-    <circle
-        android:cx="54"
-        android:cy="30"
-        android:r="5"
-        android:fillColor="@color/brand_coral" />
+        android:pathData="M63,53 a5,5 0 0,1 10,0 v18 a5,5 0 0,1 -10,0 v-18 Z" />
+    <path
+        android:fillColor="@color/brand_coral"
+        android:pathData="M49,30 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 Z" />
 </vector>

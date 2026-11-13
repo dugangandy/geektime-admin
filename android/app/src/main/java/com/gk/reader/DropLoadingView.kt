@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
@@ -40,9 +41,11 @@ class DropLoadingView @JvmOverloads constructor(
     private val fall = AccelerateInterpolator()
     private val rise = DecelerateInterpolator()
 
+    /** 复用 Path，避免每帧分配。 */
+    private val dropPath = Path()
+
     private var animator: ValueAnimator? = null
     private var phase = 0f          // 0..1 循环；-1 表示静态降级
-    private var visible = true
 
     init {
         dropPaint.color = dropColor
@@ -76,23 +79,25 @@ class DropLoadingView @JvmOverloads constructor(
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        visible = visibility == View.VISIBLE
-        if (visible) play() else stop()
+        // 用自身可见性判断：父容器变更时回调参数是「变化视图」的可见性，不能直接采用
+        if (this.visibility == View.VISIBLE) play() else stop()
     }
 
-    private fun reduceMotion(): Boolean {
-        return try {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE, 1f
-            ) == 0f
-        } catch (_: Settings.SettingNotFoundException) {
-            false
-        }
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        // 切后台时 View 自身可见性不变，只有窗口不可见；不在这里停，动画会一直在后台空转
+        if (visibility == View.VISIBLE && this.visibility == View.VISIBLE) play() else stop()
     }
+
+    /** 三参 getFloat 缺失时返回默认值，不会抛异常，无需 try/catch。 */
+    private fun reduceMotion(): Boolean =
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) == 0f
 
     private fun play() {
-        if (!visible) return
+        if (visibility != View.VISIBLE) return
         if (reduceMotion()) {
             // 降级：静态水滴 + 一圈淡涟漪，不做循环
             phase = -1f
@@ -118,16 +123,21 @@ class DropLoadingView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
+        // 按控件最短边等比缩放：同一套参数可用于 48dp 全屏 / 30dp 按钮内联
+        val size = minOf(width, height).toFloat()
+        val r = size * 0.125f
         val cx = width / 2f
-        val top = paddingTop + context.dp(6f)
-        // drawCircle 需要 Float，这里统一成 Float 免得每处再转换
-        val baseline = (height - paddingBottom - context.dp(6f)).toFloat()
-        val r = context.dp(6f).toFloat()
+        val top = paddingTop + r
+        val baseline = (height - paddingBottom).toFloat() - r
+        ripplePaint.strokeWidth = (size * 0.042f).coerceAtLeast(1f)
 
-        // 珊瑚橙凝聚点（静态点睛）
+        // 珊瑚橙凝聚点（静态点睛）；30dp 内联尺寸下按比例算只有不到 1px，兜到 1dp 免得糊成一团
         dropPaint.color = accentColor
         dropPaint.alpha = 255
-        canvas.drawCircle(cx, top + r * 0.4f, context.dp(1.5f).toFloat(), dropPaint)
+        canvas.drawCircle(
+            cx, top + r * 0.4f,
+            (size * 0.031f).coerceAtLeast(context.dp(1f).toFloat()), dropPaint
+        )
 
         if (phase < 0f) {
             // 静态降级
@@ -162,20 +172,14 @@ class DropLoadingView @JvmOverloads constructor(
     private fun drawDrop(canvas: Canvas, cx: Float, tipY: Float, r: Float, alpha: Float) {
         dropPaint.color = dropColor
         dropPaint.alpha = (alpha * 255).toInt()
-        // 水滴：尖端三角 + 底部半圆
+        // 水滴：尖端三角 + 底部半圆，复用 dropPath
         canvas.drawCircle(cx, tipY + r * 1.2f, r, dropPaint)
-        canvas.save()
-        canvas.translate(cx, tipY)
-        // 三角（尖端在 0,0，底在 y=r*1.2 两侧）
-        canvas.drawPath(
-            android.graphics.Path().apply {
-                moveTo(0f, 0f)
-                lineTo(-r, r * 1.2f)
-                lineTo(r, r * 1.2f)
-                close()
-            }, dropPaint
-        )
-        canvas.restore()
+        dropPath.reset()
+        dropPath.moveTo(cx, tipY)
+        dropPath.lineTo(cx - r, tipY + r * 1.2f)
+        dropPath.lineTo(cx + r, tipY + r * 1.2f)
+        dropPath.close()
+        canvas.drawPath(dropPath, dropPaint)
         dropPaint.alpha = 255
     }
 }

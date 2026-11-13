@@ -20,7 +20,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
@@ -417,7 +416,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         loadingCourses = true
-        if (!silent) showSkeleton()
+        if (!silent) showLoading()
         lifecycleScope.launch {
             try {
                 val data = api.courses()
@@ -426,7 +425,7 @@ class MainActivity : AppCompatActivity() {
                     buildChips()
                     renderCourses()
                     refresh.isRefreshing = false
-                    // 首次进入：骨架 → 列表淡入；下拉刷新不重播，避免每次刷新都晃一下
+                    // 首次进入：水滴加载 → 列表淡入；下拉刷新不重播，避免每次刷新都晃一下
                     if (!silent) Ui.fadeInUp(refresh, 0, 8)
                 }
             } catch (e: AuthExpired) {
@@ -497,7 +496,7 @@ class MainActivity : AppCompatActivity() {
                 renderCourses()
             }
         } else {
-            // 骨架要真正移除，不然呼吸动画会在不可见的占位里一直空转
+            // 加载态要真正移除，不然水滴动画会在不可见的占位里一直空转
             listEmpty.removeAllViews()
             listEmpty.visibility = View.GONE
             refresh.visibility = View.VISIBLE
@@ -545,11 +544,13 @@ class MainActivity : AppCompatActivity() {
         continueBox.addView(card)
     }
 
-    /** 首屏加载占位：和卡片列表同版式的骨架屏，比「正在加载…」少一次视觉跳变。 */
-    private fun showSkeleton() {
-        listEmpty.gravity = Gravity.TOP
+    /** 首屏加载态：统一为水滴加载动画 */
+    private fun showLoading() {
+        listEmpty.gravity = Gravity.CENTER
         listEmpty.removeAllViews()
-        listEmpty.addView(Skeleton.cards(this))
+        listEmpty.addView(DropLoadingView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
+        })
         listEmpty.visibility = View.VISIBLE
         refresh.visibility = View.GONE
     }

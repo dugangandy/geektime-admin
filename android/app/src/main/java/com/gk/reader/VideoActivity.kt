@@ -17,7 +17,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -88,7 +87,7 @@ class VideoActivity : AppCompatActivity() {
     private lateinit var videoFrame: AspectLayout
     private lateinit var tex: TextureView
     private lateinit var controls: View
-    private lateinit var loading: ProgressBar
+    private lateinit var loading: DropLoadingView
     private lateinit var playBtn: ImageView
     private lateinit var seek: SeekBar
     private lateinit var curText: TextView
@@ -174,8 +173,8 @@ class VideoActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
 
-        loading = ProgressBar(this).apply {
-            layoutParams = FrameLayout.LayoutParams(dp(36), dp(36)).apply { gravity = Gravity.CENTER }
+        loading = DropLoadingView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(48), dp(48)).apply { gravity = Gravity.CENTER }
         }
         root.addView(loading)
 

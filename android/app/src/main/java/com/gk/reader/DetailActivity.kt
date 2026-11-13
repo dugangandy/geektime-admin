@@ -270,7 +270,13 @@ class DetailActivity : AppCompatActivity() {
     private fun showLoading() {
         listBox.removeAllViews()
         rows.clear()
-        listBox.addView(Skeleton.syllabus(this))
+        // 统一为水滴加载动画，居中偏上，避免与返回栏贴太近
+        listBox.addView(DropLoadingView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = dp(64)
+            }
+        })
     }
 
     private fun load(silent: Boolean) {

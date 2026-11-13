@@ -5,48 +5,26 @@
     android:viewportWidth="48"
     android:viewportHeight="48">
     <!-- 圆角砖底（呼应 Adaptive Icon 安全区，居中留 2dp 边距防裁切） -->
-    <rect
-        android:x="2"
-        android:y="2"
-        android:width="44"
-        android:height="44"
-        android:rx="11"
-        android:fillColor="@color/brand_navy" />
+    <path
+        android:fillColor="@color/brand_navy"
+        android:pathData="M13,2 H35 A11,11 0 0,1 46,13 V35 A11,11 0 0,1 35,46 H13 A11,11 0 0,1 2,35 V13 A11,11 0 0,1 13,2 Z" />
     <!-- 书页基线（淡薄荷，暗示「书」） -->
-    <rect
-        android:x="14"
-        android:y="34"
-        android:width="20"
-        android:height="3"
-        android:rx="1.5"
+    <path
         android:fillColor="@color/brand_mint"
-        android:fillAlpha="0.45" />
-    <!-- 三段向上声波条（听书 / 播放） -->
-    <rect
-        android:x="15"
-        android:y="25"
-        android:width="4"
-        android:height="9"
-        android:rx="2"
-        android:fillColor="@color/brand_mint" />
-    <rect
-        android:x="22"
-        android:y="18"
-        android:width="4"
-        android:height="16"
-        android:rx="2"
-        android:fillColor="@color/brand_mint" />
-    <rect
-        android:x="29"
-        android:y="22"
-        android:width="4"
-        android:height="12"
-        android:rx="2"
-        android:fillColor="@color/brand_mint" />
+        android:fillAlpha="0.45"
+        android:pathData="M15.5,34 H32.5 A1.5,1.5 0 0,1 34,35.5 A1.5,1.5 0 0,1 32.5,37 H15.5 A1.5,1.5 0 0,1 14,35.5 A1.5,1.5 0 0,1 15.5,34 Z" />
+    <!-- 三段向上声波条（胶囊形，宽度 6、间距 3） -->
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M12,29 a3,3 0 0,1 6,0 v2 a3,3 0 0,1 -6,0 v-2 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M21,21 a3,3 0 0,1 6,0 v10 a3,3 0 0,1 -6,0 v-10 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M30,25 a3,3 0 0,1 6,0 v6 a3,3 0 0,1 -6,0 v-6 Z" />
     <!-- 珊瑚橙凝聚点（与加载动画的水滴源点呼应） -->
-    <circle
-        android:cx="24"
-        android:cy="12"
-        android:r="2.2"
-        android:fillColor="@color/brand_coral" />
+    <path
+        android:fillColor="@color/brand_coral"
+        android:pathData="M21.8,12 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0 Z" />
 </vector>
