@@ -6,6 +6,9 @@
 !/.gitignore
 !/README.md
 
+# GitHub Actions 工作流
+!/.github/
+
 # 根目录：服务端、首页生成器、启动脚本、测试
 !/serve.py
 !/site_generator.py
