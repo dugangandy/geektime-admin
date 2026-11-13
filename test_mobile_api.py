@@ -326,6 +326,8 @@ class MobileApiCase(unittest.TestCase):
         self.assertEqual(payload["audio_url"], "/Course%20A/00-audio.mp3")
         self.assertEqual(payload["pdf_url"], "/Course%20A/00-doc.pdf")
         self.assertEqual(payload["video_url"], "/Course%20A/00-video.mp4")
+        # 播放页占位用的宽高：夹具里是假 mp4，探测失败必须优雅退回 0
+        self.assertEqual((payload["video_width"], payload["video_height"]), (0, 0))
         self.assertIn("hello", payload["body_html"])
         self.assertIsNone(payload["prev"])
         self.assertEqual(payload["next"]["idx"], 1)
@@ -681,6 +683,42 @@ class IndexUnionCase(unittest.TestCase):
             self.assertEqual([c["name"] for c in index.courses()], ["新课程"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+
+class VideoSizeCase(unittest.TestCase):
+    """播放页占位用的视频宽高：解析成功 / 失败都要有确定的结果。"""
+
+    def setUp(self):
+        import mobile_api
+        self.mobile_api = mobile_api
+
+    def test_parses_ffprobe_output(self):
+        from unittest import mock
+        with mock.patch.object(self.mobile_api.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout=b"1920,1080\n")
+            self.assertEqual(self.mobile_api._video_size("x.mp4"), (1920, 1080))
+            self.assertEqual(self.mobile_api._video_size("x.webm"), (1920, 1080))
+
+    def test_invalid_or_missing_probe_returns_zero(self):
+        from unittest import mock
+        cases = [
+            mock.Mock(returncode=1, stdout=b""),
+            mock.Mock(returncode=0, stdout=b""),
+            mock.Mock(returncode=0, stdout=b"1920\n"),
+            mock.Mock(returncode=0, stdout=b"0,0\n"),
+        ]
+        with mock.patch.object(self.mobile_api.subprocess, "run") as run:
+            for case in cases:
+                run.return_value = case
+                self.assertEqual(self.mobile_api._video_size("x.mp4"), (0, 0))
+            run.side_effect = FileNotFoundError
+            self.assertEqual(self.mobile_api._video_size("x.mp4"), (0, 0))
+
+    def test_non_video_ext_skips_probe(self):
+        from unittest import mock
+        with mock.patch.object(self.mobile_api.subprocess, "run") as run:
+            self.assertEqual(self.mobile_api._video_size("x.mp3"), (0, 0))
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

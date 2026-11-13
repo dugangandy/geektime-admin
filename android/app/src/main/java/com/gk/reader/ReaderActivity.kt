@@ -282,7 +282,8 @@ class ReaderActivity : AppCompatActivity() {
         VideoActivity.open(
             this, courseId, data.idx, data.videoUrl, data.title,
             listOf(data.course, data.author).filter { it.isNotBlank() }.joinToString(" · "),
-            progressMap[data.idx]?.audioPos ?: 0L
+            progressMap[data.idx]?.audioPos ?: 0L,
+            data.videoWidth, data.videoHeight
         )
     }
 

@@ -53,6 +53,8 @@ class VideoActivity : AppCompatActivity() {
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_SUB = "sub"
         private const val EXTRA_START = "startMs"
+        private const val EXTRA_VIDEO_W = "videoWidth"
+        private const val EXTRA_VIDEO_H = "videoHeight"
 
         fun open(
             ctx: Context,
@@ -61,7 +63,9 @@ class VideoActivity : AppCompatActivity() {
             videoUrl: String,
             title: String,
             sub: String,
-            startMs: Long
+            startMs: Long,
+            videoWidth: Int = 0,
+            videoHeight: Int = 0
         ) {
             ctx.startActivity(
                 Intent(ctx, VideoActivity::class.java)
@@ -71,6 +75,8 @@ class VideoActivity : AppCompatActivity() {
                     .putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_SUB, sub)
                     .putExtra(EXTRA_START, startMs)
+                    .putExtra(EXTRA_VIDEO_W, videoWidth)
+                    .putExtra(EXTRA_VIDEO_H, videoHeight)
             )
         }
     }
@@ -110,11 +116,13 @@ class VideoActivity : AppCompatActivity() {
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val sub = intent.getStringExtra(EXTRA_SUB).orEmpty()
+        val videoWidth = intent.getIntExtra(EXTRA_VIDEO_W, 0)
+        val videoHeight = intent.getIntExtra(EXTRA_VIDEO_H, 0)
         if (url.isEmpty()) {
             finish()
             return
         }
-        buildUi(title, sub)
+        buildUi(title, sub, videoWidth, videoHeight)
         startPlayer(api.absolute(url))
     }
 
@@ -133,7 +141,7 @@ class VideoActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------ 布局
-    private fun buildUi(title: String, sub: String) {
+    private fun buildUi(title: String, sub: String, videoWidth: Int, videoHeight: Int) {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -141,6 +149,11 @@ class VideoActivity : AppCompatActivity() {
         }
 
         videoFrame = AspectLayout(this)
+        // 服务端已给真实宽高：进页面就按真实比例占位，不等 onVideoSizeChanged
+        // 才从默认 16:9 跳过去；拿不到时才沿用默认比例。
+        if (videoWidth > 0 && videoHeight > 0) {
+            videoFrame.ratio = videoWidth.toFloat() / videoHeight.toFloat()
+        }
         root.addView(videoFrame, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -424,8 +437,8 @@ class VideoActivity : AppCompatActivity() {
 
 /**
  * 按视频宽高比摆放唯一子 View（纯黑边填充剩余空间）。
- * 参考 XinghaiFm 的 AspectLayout：拿到真实画面尺寸前先按 16:9 留边，
- * 避免第一帧出来前被拉满全屏。
+ * 参考 XinghaiFm 的 AspectLayout：优先用服务端给的真实宽高占位，拿不到才
+ * 退回 16:9，避免第一帧出来前被拉满全屏、也避免加载后比例跳变。
  */
 class AspectLayout(ctx: Context) : ViewGroup(ctx) {
 

@@ -76,6 +76,8 @@ data class LessonDetail(
     val audioUrl: String,
     val pdfUrl: String,
     val videoUrl: String = "",
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
     val bodyHtml: String,
     val prev: NavRef?,
     val next: NavRef?

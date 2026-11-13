@@ -28,6 +28,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -51,6 +52,31 @@ LESSON_RE = re.compile(
 AUDIO_KEY_RE = re.compile(rb'"audio":"([^"\\]*)"')
 PDF_KEY_RE = re.compile(rb'"pdf":"([^"\\]*)"')
 VIDEO_KEY_RE = re.compile(rb'"video":"([^"\\]*)"')
+VIDEO_SIZE_EXTS = {".mp4", ".m4v", ".mov", ".webm", ".mkv", ".flv", ".avi"}
+
+
+def _video_size(path):
+    """读视频真实宽高，供播放页在首帧之前就按真实比例占位。
+
+    用 ffprobe 而不是只解析 MP4 box：课程里有不少 MPEG-TS 流但扩展名是 .mp4，
+    纯 MP4 解析会漏掉。拿不到（没装 ffprobe / 文件损坏 / 非视频）时返回 (0, 0)，
+    客户端沿用默认 16:9 占位，并由 onVideoSizeChanged 兜底，不会比现在更差。
+    """
+    if os.path.splitext(path)[1].lower() not in VIDEO_SIZE_EXTS:
+        return 0, 0
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
+            capture_output=True, timeout=10)
+        lines = (proc.stdout or b"").decode("utf-8", "replace").strip().splitlines()
+        if proc.returncode != 0 or not lines:
+            return 0, 0
+        w, h = (int(x) for x in lines[0].split(",")[:2])
+        return (w, h) if w > 0 and h > 0 else (0, 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0, 0
+
 
 # 本地新增课程（还没进 115 门清单）也要能在 App 里看到，分类规则复用首页生成器，
 # 避免 API 与首页各维护一份关键词表。导入失败时退回空分类，不影响其它功能。
@@ -541,6 +567,40 @@ class MobileAPI:
         self._lesson_cache = OrderedDict()      # path -> (mtime, dict, bytes)
         self._lesson_bytes = 0
         self._media_cache = {}                  # (path, mtime) -> {audio_url, pdf_url}
+        self._video_size_cache = {}             # (path, mtime) -> (width, height)
+
+    def _video_size_cached(self, path):
+        if not path:
+            return 0, 0
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            return 0, 0
+        key = (path, mtime)
+        with self._lesson_lock:
+            cached = self._video_size_cache.get(key)
+        if cached is not None:
+            return cached
+        size = _video_size(path)
+        with self._lesson_lock:
+            if len(self._video_size_cache) > 4000:
+                self._video_size_cache.clear()
+            self._video_size_cache[key] = size
+        return size
+
+    def _video_path_from_url(self, url):
+        """把已校验过的站内媒体 URL 还原成本地路径；仍做一次越界与存在性检查。"""
+        if not url:
+            return ""
+        try:
+            rel = urllib.parse.unquote(url.lstrip("/")).replace("\\", "/")
+        except ValueError:
+            return ""
+        target = os.path.realpath(os.path.join(self.data_dir, rel))
+        root = os.path.realpath(self.data_dir)
+        if not target.startswith(root + os.sep) or not os.path.isfile(target):
+            return ""
+        return target
 
     # ------------------------------------------------------------ 入口
     def handle(self, h):
@@ -930,6 +990,9 @@ class MobileAPI:
         next_row = (catalog["items"][pos + 1]
                     if 0 <= pos < len(catalog["items"]) - 1 else None)
         media = self._media(course, idx)
+        # 播放页据此在首帧之前就按真实比例占位；只在单讲接口探测，避免
+        # 课程详情逐个 item 调用时起上百个 ffprobe 进程。
+        vw, vh = self._video_size_cached(self._video_path_from_url(media["video_url"]))
         # 客户端 WebView 用它当 base，正文里的相对路径图片才能解析到讲次所在目录
         page_rel = os.path.relpath(path, self.data_dir).replace(os.sep, "/")
         h._send_json({
@@ -946,6 +1009,8 @@ class MobileAPI:
             "audio_url": media["audio_url"],
             "pdf_url": media["pdf_url"],
             "video_url": media["video_url"],
+            "video_width": vw,
+            "video_height": vh,
             "body_html": data.get("body") or "",
             "body_bytes": len((data.get("body") or "").encode("utf-8")),
             "prev": ({"idx": prev_row["idx"], "title": prev_row["label"]}

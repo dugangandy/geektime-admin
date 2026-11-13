@@ -281,6 +281,8 @@ class Api(context: Context, val prefs: Prefs) {
             audioUrl = json.optString("audio_url"),
             pdfUrl = json.optString("pdf_url"),
             videoUrl = json.optString("video_url"),
+            videoWidth = json.optInt("video_width"),
+            videoHeight = json.optInt("video_height"),
             bodyHtml = json.optString("body_html"),
             prev = parseNav(json.optJSONObject("prev")),
             next = parseNav(json.optJSONObject("next"))
