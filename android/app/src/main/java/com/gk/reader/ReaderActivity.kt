@@ -292,7 +292,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * 底栏播放器：与列表页 MiniPlayer 同一套样式（封面 + 标题/副标题 + 播放 + 停止 + 目录），
+     * 底栏播放器：与列表页 MiniPlayer 同一套样式（封面 + 标题/副标题 + 播放 + 目录），
      * 进度条放在播放条上方，手感与全屏播放页一致。
      */
     private fun buildAudioBar(): LinearLayout {
@@ -343,9 +343,6 @@ class ReaderActivity : AppCompatActivity() {
         row.addView(col)
         audioToggle = Ui.icon(this, R.drawable.ic_play, c(R.color.text), 22, "播放讲述") { toggleAudio() }
         row.addView(audioToggle)
-        row.addView(Ui.icon(this, R.drawable.ic_stop, c(R.color.text_dim), 20, "停止播放") {
-            PlayerController.stopPlayback()
-        })
         row.addView(Ui.icon(this, R.drawable.ic_queue, c(R.color.text_dim), 20, "课程目录") {
             openCourseSheet()
         })

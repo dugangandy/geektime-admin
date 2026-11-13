@@ -12,4 +12,26 @@
     <color name="red">#FF6B70</color>
     <color name="tag_video">#8FA8FF</color>
     <color name="scrim">#B3000000</color>
+    <!-- 课程详情顶栏（深色）：近黑灰，白字仍清晰 -->
+    <color name="detail_header_top">#2A2A2F</color>
+    <color name="detail_header_mid">#232327</color>
+    <color name="detail_header_bottom">#1B1B1F</color>
+    <color name="detail_header_fg">#FFFFFF</color>
+    <color name="detail_header_fg_dim">#B3FFFFFF</color>
+    <color name="detail_header_fg_weak">#99FFFFFF</color>
+    <color name="detail_header_fg_strong">#F2FFFFFF</color>
+    <color name="detail_header_track">#4DFFFFFF</color>
+    <color name="detail_status_bar">#121212</color>
+    <!-- 启动过渡页（深色）：深空底 + 近白字 -->
+    <color name="splash_bg">#06101A</color>
+    <color name="splash_grad_top">#0B1E30</color>
+    <color name="splash_grad_bottom">#071625</color>
+    <color name="splash_text">#F2F6FF</color>
+    <color name="splash_accent">#59E1B3</color>
+    <color name="splash_brand_text">#8D9BB6</color>
+    <color name="splash_glow_a">#2E59E1B3</color>
+    <color name="splash_glow_b">#24FF8066</color>
+    <color name="splash_track">#1AFFFFFF</color>
+    <color name="splash_bar_a">#59E1B3</color>
+    <color name="splash_bar_b">#FF8066</color>
 </resources>

@@ -9,7 +9,7 @@ import android.widget.LinearLayout
 
 /**
  * 全局迷你播放条：有播放内容时出现，点开全屏播放器。
- * 右侧固定是「播放 / 停止」，最后一个按钮按页面决定：首页是关闭，详情页是课程目录。
+ * 右侧是「播放/暂停」和按页面决定的按钮：首页是关闭，详情页是课程目录。
  */
 class MiniPlayer(context: Context, private val showQueue: Boolean = false) : LinearLayout(context) {
     private val cover = CoverView(context, 34, 34, 6f)
@@ -17,9 +17,6 @@ class MiniPlayer(context: Context, private val showQueue: Boolean = false) : Lin
     private val sub = Ui.text(context, "", 11f, context.c(R.color.text_dim), false, 1)
     private val toggle = Ui.icon(context, R.drawable.ic_play, context.c(R.color.text), 22, "播放") {
         PlayerController.toggle()
-    }
-    private val stop = Ui.icon(context, R.drawable.ic_stop, context.c(R.color.text_dim), 20, "停止播放") {
-        PlayerController.stopPlayback()
     }
     private val queue = Ui.icon(context, R.drawable.ic_queue, context.c(R.color.text_dim), 20, "课程目录") {
         openCourseSheet()
@@ -58,7 +55,6 @@ class MiniPlayer(context: Context, private val showQueue: Boolean = false) : Lin
         }
         row.addView(column)
         row.addView(toggle)
-        row.addView(stop)
         row.addView(if (showQueue) queue else close)
         addView(row)
     }

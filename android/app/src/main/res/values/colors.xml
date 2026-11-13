@@ -16,4 +16,26 @@
     <color name="brand_navy">#102A43</color>
     <color name="brand_mint">#59E1B3</color>
     <color name="brand_coral">#FF8066</color>
+    <!-- 课程详情顶栏（浅色）：浅灰白底 + 深色文字，标签沿用列表的橙色描边样式 -->
+    <color name="detail_header_top">#EEF0F3</color>
+    <color name="detail_header_mid">#F5F6F8</color>
+    <color name="detail_header_bottom">#FFFFFF</color>
+    <color name="detail_header_fg">#1A1A1A</color>
+    <color name="detail_header_fg_dim">#6E7681</color>
+    <color name="detail_header_fg_weak">#8A8F99</color>
+    <color name="detail_header_fg_strong">#1A1A1A</color>
+    <color name="detail_header_track">#1F000000</color>
+    <color name="detail_status_bar">#EEF0F3</color>
+    <!-- 启动过渡页（浅色）：浅底 + 深墨蓝字 -->
+    <color name="splash_bg">#F3F6F9</color>
+    <color name="splash_grad_top">#FFFFFF</color>
+    <color name="splash_grad_bottom">#E7EEF5</color>
+    <color name="splash_text">#102A43</color>
+    <color name="splash_accent">#0E9E74</color>
+    <color name="splash_brand_text">#7C8593</color>
+    <color name="splash_glow_a">#3359E1B3</color>
+    <color name="splash_glow_b">#26FF8066</color>
+    <color name="splash_track">#1F102A43</color>
+    <color name="splash_bar_a">#59E1B3</color>
+    <color name="splash_bar_b">#FF8066</color>
 </resources>

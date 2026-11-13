@@ -3,6 +3,7 @@ package com.gk.reader
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
@@ -23,13 +24,12 @@ import android.widget.TextView
 /**
  * 极客听书 · 全屏品牌过渡页（参考星海 FM 的 #boot / 恢复过渡页）。
  *
- * 结构：整屏深空渐变 + 左上薄荷 / 右下珊瑚两团柔光 + 悬浮声波标 + slogan
- * + 细滑动载入条 + 底部品牌行。
+ * 两套主题：
+ * - 浅色：浅底 + 深墨蓝砖标 + 深墨蓝 slogan
+ * - 深色：深空底 + 去砖声波标 + 近白 slogan
  *
- * 性能：只动 translate / alpha / 一条 shader 平移；柔光用超大半径 radial-gradient
- * 模拟，不用 blur / 位图缩放，低端机首帧也便宜。
- *
- * 用法：作为全屏内容铺满；就绪后 [fadeOut] 320ms 淡出，露出下方界面。
+ * 只动 translate / alpha / 一条 shader 平移；柔光用超大半径 radial-gradient 模拟，
+ * 不用 blur / 位图缩放，低端机首帧也便宜。
  */
 class SplashView @JvmOverloads constructor(
     context: Context,
@@ -40,10 +40,13 @@ class SplashView @JvmOverloads constructor(
     private val bar = BootBar(context)
     private var logoFloat: ObjectAnimator? = null
 
+    private val night = (context.resources.configuration.uiMode
+        and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
     init {
         // 过渡层期间挡住下方点击，避免点到被盖住的表单
         isClickable = true
-        setBackgroundColor(SPLASH_BG)
+        setBackgroundColor(context.c(R.color.splash_bg))
         addView(BackdropView(context), LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -55,14 +58,15 @@ class SplashView @JvmOverloads constructor(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER
             )
         }
-        logo.setImageResource(R.drawable.ic_brand_wave)
+        // 浅底用带深墨蓝砖底的 ic_brand；深底用去砖声波标，避免和背景糊在一起
+        logo.setImageResource(if (night) R.drawable.ic_brand_wave else R.drawable.ic_brand)
         logo.scaleType = ImageView.ScaleType.FIT_CENTER
         col.addView(logo, LinearLayout.LayoutParams(dp(96), dp(96)))
 
-        col.addView(text("听一课", 34f, 0xFFF2F6FF.toInt(), true).apply {
+        col.addView(text("听一课", 34f, context.c(R.color.splash_text), true).apply {
             setPadding(0, dp(22), 0, 0)
         })
-        col.addView(text("即刻成长", 34f, context.c(R.color.brand_mint), true).apply {
+        col.addView(text("即刻成长", 34f, context.c(R.color.splash_accent), true).apply {
             setPadding(0, dp(6), 0, 0)
         })
         col.addView(bar, LinearLayout.LayoutParams(dp(108), dp(3)).apply { topMargin = dp(26) })
@@ -74,15 +78,13 @@ class SplashView @JvmOverloads constructor(
             layoutParams = LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            ).apply {
-                bottomMargin = dp(46)
-            }
+            ).apply { bottomMargin = dp(46) }
         }
         brand.addView(ImageView(context).apply {
-            setImageResource(R.drawable.ic_brand_wave)
+            setImageResource(if (night) R.drawable.ic_brand_wave else R.drawable.ic_brand)
             layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) }
         })
-        brand.addView(text("极客听书", 12.5f, 0xFF8D9BB6.toInt(), false).apply {
+        brand.addView(text("极客听书", 12.5f, context.c(R.color.splash_brand_text), false).apply {
             letterSpacing = 0.18f
         })
         addView(brand)
@@ -128,7 +130,7 @@ class SplashView @JvmOverloads constructor(
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
-    /** 深空渐变 + 两团柔光，纯 gradient 模拟，不花 blur 的钱。 */
+    /** 主题渐变底 + 两团柔光，纯 gradient 模拟，不花 blur 的钱。 */
     private class BackdropView(ctx: Context) : View(ctx) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var base: LinearGradient? = null
@@ -140,17 +142,23 @@ class SplashView @JvmOverloads constructor(
             if (w <= 0 || h <= 0) return
             base = LinearGradient(
                 0f, 0f, 0f, h.toFloat(),
-                intArrayOf(0xFF0B1E30.toInt(), SplashView.SPLASH_BG, 0xFF071625.toInt()),
+                intArrayOf(
+                    context.c(R.color.splash_grad_top),
+                    context.c(R.color.splash_bg),
+                    context.c(R.color.splash_grad_bottom)
+                ),
                 floatArrayOf(0f, 0.66f, 1f), Shader.TileMode.CLAMP
             )
             val r = (maxOf(w, h) * 0.85f).coerceAtLeast(1f)
+            val ga = context.c(R.color.splash_glow_a)
+            val gb = context.c(R.color.splash_glow_b)
             glowA = RadialGradient(
                 w * 0.02f, -h * 0.08f, r,
-                intArrayOf(0x2E59E1B3, 0x0059E1B3), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
+                intArrayOf(ga, ga and 0x00FFFFFF), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
             )
             glowB = RadialGradient(
                 w * 1.04f, h * 1.02f, r,
-                intArrayOf(0x24FF8066, 0x00FF8066), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
+                intArrayOf(gb, gb and 0x00FFFFFF), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
             )
         }
 
@@ -175,9 +183,11 @@ class SplashView @JvmOverloads constructor(
         override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
             super.onSizeChanged(w, h, ow, oh)
             if (w <= 0) return
+            val a = context.c(R.color.splash_bar_a)
+            val b = context.c(R.color.splash_bar_b)
             shader = LinearGradient(
                 0f, 0f, w * 0.38f, 0f,
-                intArrayOf(0x0059E1B3, 0xFF59E1B3.toInt(), 0xFFFF8066.toInt(), 0x00FF8066),
+                intArrayOf(a and 0x00FFFFFF, a, b, b and 0x00FFFFFF),
                 floatArrayOf(0f, 0.35f, 0.7f, 1f), Shader.TileMode.CLAMP
             )
         }
@@ -203,7 +213,7 @@ class SplashView @JvmOverloads constructor(
             val h = height.toFloat()
             if (w <= 0f || h <= 0f) return
             val trackW = w * 0.38f
-            trackPaint.color = 0x1AFFFFFF
+            trackPaint.color = context.c(R.color.splash_track)
             canvas.drawRoundRect(0f, 0f, w, h, h / 2f, h / 2f, trackPaint)
             val x = -trackW + (w + trackW) * t
             canvas.save()
@@ -213,10 +223,5 @@ class SplashView @JvmOverloads constructor(
             canvas.restore()
             paint.shader = null
         }
-    }
-
-    companion object {
-        /** 过渡页深空底色，LoginActivity 也用它同步状态栏。 */
-        const val SPLASH_BG = 0xFF06101A.toInt()
     }
 }

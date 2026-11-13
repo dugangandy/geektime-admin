@@ -417,15 +417,21 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    /** 过渡层整屏深色，状态栏/导航栏同步切深，避免白条割裂。 */
+    /** 过渡层/表单状态栏跟随主题，避免白条割裂或图标看不见。 */
     private fun applySplashBars(on: Boolean) {
-        val barColor = if (on) SplashView.SPLASH_BG else c(R.color.bg)
+        val barColor = c(if (on) R.color.splash_bg else R.color.bg)
         window.statusBarColor = barColor
         window.navigationBarColor = barColor
+        // 过渡层与表单背景都跟随主题：夜间用浅色图标，浅色主题用深色图标
+        val lightIcons = isNight()
         val ctrl = WindowInsetsControllerCompat(window, window.decorView)
-        ctrl.isAppearanceLightStatusBars = !on
-        ctrl.isAppearanceLightNavigationBars = !on
+        ctrl.isAppearanceLightStatusBars = !lightIcons
+        ctrl.isAppearanceLightNavigationBars = !lightIcons
     }
+
+    private fun isNight(): Boolean =
+        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     @Suppress("DEPRECATION")
     private fun goMain() {

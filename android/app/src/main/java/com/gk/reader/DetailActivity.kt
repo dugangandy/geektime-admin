@@ -2,7 +2,6 @@ package com.gk.reader
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
@@ -21,7 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 课程详情：深色课程头（课名 / 作者 / 整体进度）+ 分组目录列表。
+ * 课程详情：课程头（课名 / 作者 / 整体进度）+ 分组目录列表。
+ * 课头配色走 res：浅色为浅灰白底 + 深色字（标签与列表同为橙色），深色为近黑底 + 浅色字。
  * 目录头部固定，只有讲次列表滚动；「回到上次学习」浮在右下角。
  */
 class DetailActivity : AppCompatActivity() {
@@ -30,12 +30,7 @@ class DetailActivity : AppCompatActivity() {
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
         private const val STATE_SCROLL = "state_scroll"
-        /** 头部深色底，和封面遮罩同色；状态栏也跟随它。 */
-        private const val HEADER_DARK = 0xFF16171C.toInt()
-        // 顶栏参照官方截图：中性冷灰（上略亮、下略暗），白色标题仍清晰
-        private const val HEADER_TOP = 0xFF787C7B.toInt()
-        private const val HEADER_MID = 0xFF747877.toInt()
-        private const val HEADER_BOTTOM = 0xFF6E7273.toInt()
+        /* 顶栏配色走 res（values / values-night）：浅色浅底深字、深色深底浅字 */
 
         fun open(ctx: Context, courseId: String, courseName: String) {
             ctx.startActivity(
@@ -85,8 +80,9 @@ class DetailActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             restoreScroll = savedInstanceState.getInt(STATE_SCROLL, -1)
         }
-        window.statusBarColor = HEADER_DARK
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+        window.statusBarColor = c(R.color.detail_status_bar)
+        // 浅色课头是浅底，状态栏要用深色图标
+        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = !isDark()
 
         buildUi()
         built = true
@@ -118,7 +114,8 @@ class DetailActivity : AppCompatActivity() {
             setBackgroundColor(c(R.color.bg))
         }
 
-        // 课程头：封面铺底 + 深色渐变，保证白色文字在任何封面上都可读
+        // 课程头：深色主题用封面铺底 + 深色渐变（白字在任何封面上都可读）；
+        // 浅色主题改成浅灰白渐变 + 深色字，橙色标签才能像列表那样清晰。
         // 高度必须写死：封面用 MATCH_PARENT 铺底时，wrap_content 会被封面原图尺寸撑到整屏，
         // 下面的内容区就会只剩 0 高（整页看起来只有深色封面）。
         val header = FrameLayout(this).apply {
@@ -130,7 +127,7 @@ class DetailActivity : AppCompatActivity() {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
-            alpha = 0.45f
+            alpha = if (isDark()) 0.45f else 0f
         }
         header.addView(coverBg)
         header.addView(View(this).apply {
@@ -139,7 +136,11 @@ class DetailActivity : AppCompatActivity() {
             )
             background = GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(HEADER_BOTTOM, HEADER_MID, HEADER_TOP)
+                intArrayOf(
+                    c(R.color.detail_header_bottom),
+                    c(R.color.detail_header_mid),
+                    c(R.color.detail_header_top)
+                )
             )
         })
 
@@ -156,17 +157,18 @@ class DetailActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(52)
         }
-        titleRow.addView(Ui.icon(this, R.drawable.ic_back, Color.WHITE, 24, "返回") { finish() })
-        headName = Ui.text(this, courseName.ifEmpty { "课程详情" }, 18f, Color.WHITE, true, 1).apply {
+        titleRow.addView(Ui.icon(this, R.drawable.ic_back, c(R.color.detail_header_fg), 24, "返回") { finish() })
+        headName = Ui.text(this, courseName.ifEmpty { "课程详情" }, 18f, c(R.color.detail_header_fg), true, 1).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { marginStart = dp(4) }
         }
         titleRow.addView(headName)
+        // 与课程列表同款：橙色描边标签，不再覆写成白字白描边
         badgeView = Ui.tag(this, "").apply { visibility = View.GONE }
         titleRow.addView(badgeView)
         column.addView(titleRow)
 
-        headByline = Ui.text(this, "", 12f, 0xB3FFFFFF.toInt(), false, 1).apply {
+        headByline = Ui.text(this, "", 12f, c(R.color.detail_header_fg_dim), false, 1).apply {
             setPadding(dp(4), 0, 0, 0)
         }
         column.addView(headByline)
@@ -176,14 +178,14 @@ class DetailActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(10), 0, 0)
         }
-        headMeta = Ui.text(this, "", 11f, 0x99FFFFFF.toInt(), false, 1)
+        headMeta = Ui.text(this, "", 11f, c(R.color.detail_header_fg_weak), false, 1)
         metaRow.addView(headMeta)
         metaRow.addView(Ui.spacer(this))
-        headPct = Ui.text(this, "", 11f, c(R.color.orange), true, 1)
+        headPct = Ui.text(this, "", 11f, c(R.color.detail_header_fg_strong), true, 1)
         metaRow.addView(headPct)
         column.addView(metaRow)
 
-        headProgress = ProgressLine(this, 3f, 0x4DFFFFFF, c(R.color.orange)).apply {
+        headProgress = ProgressLine(this, 3f, c(R.color.detail_header_track), c(R.color.orange)).apply {
             // 参照截图：进度条不再通栏，收到右侧一小段（约 120dp）
             layoutParams = LinearLayout.LayoutParams(dp(120), dp(3)).apply {
                 gravity = Gravity.END

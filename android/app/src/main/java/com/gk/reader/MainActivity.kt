@@ -255,30 +255,19 @@ class MainActivity : AppCompatActivity() {
             minimumHeight = dp(52)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            ).apply { bottomMargin = dp(8) }
         }
         head.addView(Ui.text(this, "课程库", 22f, c(R.color.text), true, 1).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         })
-        head.addView(Ui.icon(this, R.drawable.ic_search, c(R.color.text), 22, "搜索") {
-            searchInput.requestFocus()
-            showKeyboard(searchInput)
-        })
-        page.addView(head)
 
         val searchWrap = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = Ui.roundBg(this@MainActivity, context.c(R.color.surface_alt), 20f)
             setPadding(dp(12), 0, dp(12), 0)
-            minimumHeight = dp(40)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                leftMargin = dp(16)
-                rightMargin = dp(16)
-                bottomMargin = dp(10)
-            }
         }
         searchWrap.addView(Ui.icon(this, R.drawable.ic_search, c(R.color.text_dim), 17))
         searchInput = EditText(this).apply {
@@ -299,7 +288,17 @@ class MainActivity : AppCompatActivity() {
         }
         clear.visibility = View.GONE
         searchWrap.addView(clear)
-        page.addView(searchWrap)
+
+        // 搜索框挪进第一行：标题固定宽度，搜索条自适应，搜索按钮留在最右
+        head.addView(searchWrap, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+            marginStart = dp(12)
+            marginEnd = dp(4)
+        })
+        head.addView(Ui.icon(this, R.drawable.ic_search, c(R.color.text), 22, "搜索") {
+            searchInput.requestFocus()
+            showKeyboard(searchInput)
+        })
+        page.addView(head)
 
         libraryBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         page.addView(libraryBox)
