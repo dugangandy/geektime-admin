@@ -1,6 +1,6 @@
 {
   "name": "geektime-reader",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "private": true,
   "description": "极客时间本地课程库 · Android 客户端",
   "scripts": {

@@ -1,0 +1,19 @@
+<!-- 极客听书 · 深色底专用声波标（去掉深墨蓝砖底，薄荷绿三段声波 + 珊瑚橙凝聚点） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M12,29 a3,3 0 0,1 6,0 v2 a3,3 0 0,1 -6,0 v-2 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M21,21 a3,3 0 0,1 6,0 v10 a3,3 0 0,1 -6,0 v-10 Z" />
+    <path
+        android:fillColor="@color/brand_mint"
+        android:pathData="M30,25 a3,3 0 0,1 6,0 v6 a3,3 0 0,1 -6,0 v-6 Z" />
+    <path
+        android:fillColor="@color/brand_coral"
+        android:pathData="M21.8,12 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0 Z" />
+</vector>

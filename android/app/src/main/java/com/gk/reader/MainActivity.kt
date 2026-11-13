@@ -548,7 +548,7 @@ class MainActivity : AppCompatActivity() {
     private fun showLoading() {
         listEmpty.gravity = Gravity.CENTER
         listEmpty.removeAllViews()
-        listEmpty.addView(DropLoadingView(this).apply {
+        listEmpty.addView(WaveLoadingView(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
         })
         listEmpty.visibility = View.VISIBLE

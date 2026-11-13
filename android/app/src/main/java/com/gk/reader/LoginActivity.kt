@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
@@ -27,7 +28,6 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var password: EditText
     private lateinit var pingLabel: TextView
     private lateinit var loginButton: TextView
-    private lateinit var loading: DropLoadingView
     private lateinit var rememberBox: CheckBox
     private lateinit var visibleToggle: TextView
     private var busy = false
@@ -36,6 +36,8 @@ class LoginActivity : AppCompatActivity() {
     /** splash 阶段表单还没建，onSaveInstanceState 里的控件引用都还不能碰。 */
     private var formBuilt = false
     private var splashAt = 0L
+    /** 忙碌/校验期间盖在当前页上的全屏品牌过渡层。 */
+    private var splashOverlay: SplashView? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val lockTick = object : Runnable {
@@ -60,13 +62,14 @@ class LoginActivity : AppCompatActivity() {
         if (savedInstanceState == null && api.hasSession()) {
             splashAt = android.os.SystemClock.elapsedRealtime()
             setContentView(buildSplash())
+            applySplashBars(true)
             silentSessionCheck()
         } else {
             showForm(savedInstanceState)
         }
     }
 
-    private fun showForm(state: Bundle?) {
+    private fun showForm(state: Bundle?, fromSplash: Boolean = false) {
         formBuilt = true
         val view = buildUi()
         setContentView(view)
@@ -81,7 +84,13 @@ class LoginActivity : AppCompatActivity() {
                 handler.post(lockTick)
             }
         }
-        Ui.fadeIn(view, 0.85f, 180)
+        if (fromSplash) {
+            // 冷启动校验失败：表单已铺在下面，再盖一层同款全屏过渡页淡出，避免硬切
+            showSplashOverlay(autoFadeMs = 160L)
+        } else {
+            applySplashBars(false)
+            Ui.fadeIn(view, 0.85f, 180)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -100,38 +109,8 @@ class LoginActivity : AppCompatActivity() {
     private fun lockLeftSec(): Int =
         ((lockUntil - android.os.SystemClock.elapsedRealtime()) / 1000).toInt().coerceAtLeast(0)
 
-    /** 冷启动占位：品牌页 + 转圈，会话校验期间显示，避免先铺登录表单。 */
-    private fun buildSplash(): ViewGroup {
-        val box = FrameLayout(this).apply { setBackgroundColor(c(R.color.bg)) }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER
-            )
-        }
-        col.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_launcher)
-            layoutParams = LinearLayout.LayoutParams(dp(64), dp(64))
-        })
-        col.addView(Ui.text(this, "极客时间", 20f, c(R.color.text), true).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(16), 0, 0)
-        })
-        col.addView(Ui.text(this, "正在连接课程库…", 12f, c(R.color.text_dim)).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, 0)
-        })
-        col.addView(DropLoadingView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dp(22)
-            }
-        })
-        box.addView(col)
-        Ui.fadeIn(box, 0.7f, 180)
-        return box
-    }
+    /** 冷启动全屏品牌过渡页：会话校验期间整屏显示，替代原先居中的小转圈。 */
+    private fun buildSplash(): ViewGroup = SplashView(this)
 
     private fun buildUi(): ViewGroup {
         val ctx = this
@@ -259,25 +238,14 @@ class LoginActivity : AppCompatActivity() {
         }
         content.addView(rememberBox)
 
-        // 按钮 + 加载叠层：加载不占额外布局空间；busy 时隐藏按钮文字、水滴居中
+        // 登录忙碌时改为整屏品牌过渡层，按钮恢复为普通样式
         loginButton = Ui.primaryButton(this, LOGIN_LABEL) { doLogin() }.apply {
             minimumHeight = ctx.dp(46)
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        loading = DropLoadingView(this).apply {
-            visibility = View.INVISIBLE
-            layoutParams = FrameLayout.LayoutParams(ctx.dp(30), ctx.dp(30), Gravity.CENTER)
-        }
-        val loginBox = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = ctx.dp(10) }
-            addView(loginButton)
-            addView(loading)
         }
-        content.addView(loginBox)
+        content.addView(loginButton)
 
         content.addView(Ui.text(this, "常用地址", 12f, ctx.c(R.color.text_dim)).apply {
             setPadding(0, ctx.dp(26), 0, ctx.dp(6))
@@ -341,10 +309,8 @@ class LoginActivity : AppCompatActivity() {
         val blocked = busy || lockLeftSec() > 0
         loginButton.alpha = if (blocked) 0.55f else 1f
         loginButton.isClickable = !blocked
-        loading.visibility = if (busy) View.VISIBLE else View.INVISIBLE
-        // busy 时清空文字，让水滴动画在按钮中央显示，避免与文字重叠
-        loginButton.text = if (busy) "" else LOGIN_LABEL
-        // 文字清了 TalkBack 就读不到内容，busy 时补一个描述
+        // 忙碌时铺全屏品牌过渡层，完成后整屏淡出；不再在按钮里塞小转圈
+        if (busy) showSplashOverlay() else hideSplashOverlay()
         loginButton.contentDescription = if (busy) "登录中" else null
     }
 
@@ -382,7 +348,7 @@ class LoginActivity : AppCompatActivity() {
                 api.login(server, pwd, rememberBox.isChecked)
                 // 只有登录成功才落盘，否则失败的尝试会把上次的选择改掉
                 prefs.remember = rememberBox.isChecked
-                setBusy(false)
+                // 保持全屏过渡层不撤，直接切主页，新页面在其上淡入
                 goMain()
             } catch (e: ApiException) {
                 setBusy(false)
@@ -419,7 +385,7 @@ class LoginActivity : AppCompatActivity() {
                 false
             }
             if (!ok) {
-                showForm(null)
+                showForm(null, fromSplash = true)
                 return@launch
             }
             // 至少露一下品牌页，别让极快的返回把启动页闪成白屏
@@ -428,6 +394,40 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    /** 全屏品牌过渡层：铺在当前页上方，等待/登录中显示。 */
+    private fun showSplashOverlay(autoFadeMs: Long = 0L) {
+        if (splashOverlay != null) return
+        val root = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val splash = SplashView(this)
+        splashOverlay = splash
+        root.addView(splash, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        applySplashBars(true)
+        splash.play()
+        if (autoFadeMs > 0L) splash.postDelayed({ hideSplashOverlay() }, autoFadeMs)
+    }
+
+    private fun hideSplashOverlay() {
+        val splash = splashOverlay ?: return
+        splashOverlay = null
+        splash.fadeOut {
+            (splash.parent as? ViewGroup)?.removeView(splash)
+            applySplashBars(false)
+        }
+    }
+
+    /** 过渡层整屏深色，状态栏/导航栏同步切深，避免白条割裂。 */
+    private fun applySplashBars(on: Boolean) {
+        val barColor = if (on) SplashView.SPLASH_BG else c(R.color.bg)
+        window.statusBarColor = barColor
+        window.navigationBarColor = barColor
+        val ctrl = WindowInsetsControllerCompat(window, window.decorView)
+        ctrl.isAppearanceLightStatusBars = !on
+        ctrl.isAppearanceLightNavigationBars = !on
+    }
+
+    @Suppress("DEPRECATION")
     private fun goMain() {
         if (isFinishing || isDestroyed) return
         startActivity(Intent(this@LoginActivity, MainActivity::class.java))

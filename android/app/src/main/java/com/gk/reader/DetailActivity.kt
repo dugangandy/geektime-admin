@@ -32,6 +32,10 @@ class DetailActivity : AppCompatActivity() {
         private const val STATE_SCROLL = "state_scroll"
         /** 头部深色底，和封面遮罩同色；状态栏也跟随它。 */
         private const val HEADER_DARK = 0xFF16171C.toInt()
+        // 顶栏参照官方截图：中性冷灰（上略亮、下略暗），白色标题仍清晰
+        private const val HEADER_TOP = 0xFF787C7B.toInt()
+        private const val HEADER_MID = 0xFF747877.toInt()
+        private const val HEADER_BOTTOM = 0xFF6E7273.toInt()
 
         fun open(ctx: Context, courseId: String, courseName: String) {
             ctx.startActivity(
@@ -135,7 +139,7 @@ class DetailActivity : AppCompatActivity() {
             )
             background = GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(HEADER_DARK, 0xF016171C.toInt(), 0xC016171C.toInt())
+                intArrayOf(HEADER_BOTTOM, HEADER_MID, HEADER_TOP)
             )
         })
 
@@ -180,9 +184,11 @@ class DetailActivity : AppCompatActivity() {
         column.addView(metaRow)
 
         headProgress = ProgressLine(this, 3f, 0x4DFFFFFF, c(R.color.orange)).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(3)
-            ).apply { topMargin = dp(9) }
+            // 参照截图：进度条不再通栏，收到右侧一小段（约 120dp）
+            layoutParams = LinearLayout.LayoutParams(dp(120), dp(3)).apply {
+                gravity = Gravity.END
+                topMargin = dp(9)
+            }
         }
         column.addView(headProgress)
         header.addView(column)
@@ -252,7 +258,8 @@ class DetailActivity : AppCompatActivity() {
         content.addView(listFrame)
 
         root.addView(content)
-        mini = MiniPlayer(this).apply { attach() }
+        // 详情页底部保留「课程目录」；首页那条是关闭按钮
+        mini = MiniPlayer(this, showQueue = true).apply { attach() }
         root.addView(mini, MiniPlayer.layoutParams(this))
         setContentView(root)
     }
@@ -271,7 +278,7 @@ class DetailActivity : AppCompatActivity() {
         listBox.removeAllViews()
         rows.clear()
         // 统一为水滴加载动画，居中偏上，避免与返回栏贴太近
-        listBox.addView(DropLoadingView(this).apply {
+        listBox.addView(WaveLoadingView(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 topMargin = dp(64)
@@ -357,15 +364,17 @@ class DetailActivity : AppCompatActivity() {
         val chapters = if (sortDesc) data.chapters.reversed() else data.chapters
         var shown = 0
         for (chapter in chapters) {
-            val items = chapter.items.filter { matchFilter(it) }
-            if (items.isEmpty()) continue
-            shown += items.size
+            val matched = chapter.items.filter { matchFilter(it) }
+            if (matched.isEmpty()) continue
+            shown += matched.size
             val open = !collapsed.contains(chapter)
-            listBox.addView(Syllabus.chapterBar(this, chapter.name, items.size, open) {
+            listBox.addView(Syllabus.chapterBar(this, chapter.name, matched.size, open) {
                 if (open) collapsed.add(chapter) else collapsed.remove(chapter)
                 renderChapters()
             })
             if (!open) continue
+            // 倒序时章节内的讲次也要倒着排：只反转章节顺序的话，单章节课程看起来毫无变化
+            val items = if (sortDesc) matched.sortedByDescending { it.idx } else matched
             for (item in items) {
                 val row = LessonRowView(
                     this, item,
