@@ -20,7 +20,9 @@ env:
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # ubuntu-latest 已迁到 26.04，而 setup-python 没有 3.9 的 26.04 构建，故钉 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -45,19 +47,31 @@ jobs:
 
   android:
     name: Android assembleDebug
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+      # GitHub 的 Ubuntu 镜像自带 Android SDK；直接用自带 sdkmanager，
+      # 不引第三方 setup-android action（在 26.04 上实测失败）。
+      - name: Install Android SDK packages
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -n1)" || true
+          fi
+          test -n "$SDKMANAGER" || { echo "sdkmanager not found under $SDK"; exit 1; }
+          echo "using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
