@@ -1,28 +1,27 @@
 @echo off
 setlocal EnableExtensions
 rem  Pure ASCII on purpose. cmd.exe decodes .bat with the OEM code page
-rem  (GBK on zh-CN); UTF-8 Chinese comments get mis-parsed and can even be
-rem  executed as commands. Keep every line in this file ASCII.
+rem  (GBK on zh-CN); UTF-8 bytes here would shift the parse of the whole block.
+rem  A non-ASCII course folder goes into data-dir.txt (UTF-8), read by serve.py.
 cd /d "%~dp0"
 set "ROOT=%~dp0"
 
-rem  Optional: folder holding the per-course subdirectories.
-rem  Leave empty to use this script's folder. Env var GK_DATA_DIR overrides.
-rem  Example: set "DATA_DIR=D:\GeekTime Courses"
-set "DATA_DIR="
-if defined GK_DATA_DIR set "DATA_DIR=%GK_DATA_DIR%"
-if not "%DATA_DIR%"=="" if not exist "%DATA_DIR%\" (
-  echo   [ERROR] course data folder not found: %DATA_DIR%
-  pause
-  exit /b 1
-)
-set "DATAOPT="
-if not "%DATA_DIR%"=="" set DATAOPT=--data-dir "%DATA_DIR%"
-
+rem  Ports and remote target: needed by both run and stop modes.
+set "PORT=8888"
+set "RPORT=8878"
+set "PUBLIC=http://139.198.29.121:8878/"
 set "REMOTE=root@139.198.29.121"
 set "SSHOPT=-o BatchMode=yes -o ConnectTimeout=8"
 set "PING=%SystemRoot%\System32\ping.exe"
 set "CURL=%SystemRoot%\System32\curl.exe"
+
+if /i "%~1"=="stop" goto STOP
+
+rem  Course folder: keep the path in data-dir.txt (UTF-8, one line) next to
+rem  this script, or set GK_DATA_DIR. Nothing here, so this file stays ASCII.
+rem  serve.py resolves it: --data-dir > GK_DATA_DIR > data-dir.txt > this folder.
+set "DATAOPT="
+if defined GK_DATA_DIR set DATAOPT=--data-dir "%GK_DATA_DIR%"
 
 echo.
 echo   ==== geekbang offline reader ====
@@ -36,20 +35,27 @@ if not exist "%ROOT%auth.json" (
   exit /b 1
 )
 
-rem 1) Local server. Never start a duplicate: Windows SO_REUSEADDR lets
-rem    several python processes bind 127.0.0.1:8888 and split requests.
-netstat -ano | findstr /c:"127.0.0.1:8888" | findstr /c:"LISTENING" >nul
+set "STARTED_HTTP=0"
+set "STARTED_SSH=0"
+
+rem 1) Local server, started in THIS console (start /b = no extra window).
+rem    Never start a duplicate: Windows SO_REUSEADDR lets several python
+rem    processes bind 127.0.0.1:8888 and split requests.
+netstat -ano | findstr /c:"127.0.0.1:%PORT%" | findstr /c:"LISTENING" >nul
 if errorlevel 1 (
-  start "gk-http" /min python "%ROOT%serve.py" 8888 . --bind 127.0.0.1 %DATAOPT%
-  echo   [http] starting local server ...
+  start "" /b python "%ROOT%serve.py" %PORT% . --bind 127.0.0.1 %DATAOPT%
+  set "STARTED_HTTP=1"
+  echo   [http] starting local server in this window ...
   "%PING%" -n 3 127.0.0.1 >nul
 ) else (
-  echo   [http] 127.0.0.1:8888 already listening - reused
+  echo   [http] 127.0.0.1:%PORT% already listening - reused from another session
 )
 
-netstat -ano | findstr /c:"127.0.0.1:8888" | findstr /c:"LISTENING" >nul
+netstat -ano | findstr /c:"127.0.0.1:%PORT%" | findstr /c:"LISTENING" >nul
 if errorlevel 1 (
-  echo   [ERROR] local server did not start. Look at the gk-http window.
+  echo   [ERROR] local server did not start. Check the output above:
+  echo           course folder path in data-dir.txt / GK_DATA_DIR, port %PORT%,
+  echo           or stop leftover processes with: %~nx0 stop
   pause
   exit /b 1
 )
@@ -57,38 +63,87 @@ if errorlevel 1 (
 rem 2) If the public side already answers, leave the healthy tunnel alone.
 rem    fuser -k would otherwise kill the very session we are using.
 if exist "%CURL%" (
-  "%CURL%" -s -o nul -m 5 http://139.198.29.121:8888/ >nul 2>&1
+  "%CURL%" -s -o nul -m 5 %PUBLIC% >nul 2>&1
   if not errorlevel 1 (
-    echo   [ssh ] public 8888 already reachable - tunnel untouched
+    echo   [ssh ] public %RPORT% already reachable - tunnel untouched
     goto READY
   )
 )
 
-rem 3) Rebuild the tunnel. fuser -k kills the stale sshd session; the port
-rem    needs a moment to free, so wait, then verify the new listener.
+rem 3) Rebuild the tunnel, also in THIS console. fuser -k kills the stale
+rem    sshd session; the port needs a moment to free, so wait, then verify.
 rem    Use absolute ping.exe: GNU timeout from Git Bash shadows "timeout /t".
 set /a TRIES=0
 :RETRY
 set /a TRIES+=1
-echo   [ssh ] cleaning stale listener on remote:8888 ...
-ssh %SSHOPT% %REMOTE% "fuser -k 8888/tcp 2>/dev/null; echo cleaned"
+echo   [ssh ] cleaning stale listener on remote:%RPORT% ...
+ssh %SSHOPT% %REMOTE% "fuser -k %RPORT%/tcp 2>/dev/null; echo cleaned"
 "%PING%" -n 4 127.0.0.1 >nul
-start "gk-ssh" /min ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R 8888:127.0.0.1:8888 %REMOTE%
+start "" /b ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R %RPORT%:127.0.0.1:%PORT% %REMOTE%
+set "STARTED_SSH=1"
 "%PING%" -n 4 127.0.0.1 >nul
-ssh %SSHOPT% %REMOTE% "ss -tln | grep -q ':8888'" >nul 2>&1
+ssh %SSHOPT% %REMOTE% "ss -tln | grep -q ':%RPORT%'" >nul 2>&1
 if not errorlevel 1 goto READY
 if %TRIES% LSS 3 (
   echo   [ssh ] bind failed, retry %TRIES%/3 ...
   goto RETRY
 )
-echo   [ERROR] remote:8888 still has no listener after 3 attempts.
-echo           Check the gk-ssh window, ssh keys and remote GatewayPorts yes.
+echo   [ERROR] remote:%RPORT% still has no listener after 3 attempts.
+echo           Check the SSH output above, ssh keys and remote GatewayPorts yes.
+if "%STARTED_HTTP%"=="1" call :kill_http
+if "%STARTED_SSH%"=="1" call :kill_ssh
 pause
 exit /b 1
 
 :READY
 echo.
-echo   OK   http://139.198.29.121:8888/
-echo   Close the minimized gk-http / gk-ssh windows to stop.
+echo   OK   %PUBLIC%
+if "%STARTED_HTTP%%STARTED_SSH%"=="00" (
+  echo   Nothing was started by this window: the running services belong to
+  echo   another session. Run "%~nx0 stop" to force-stop them.
+  echo.
+  pause
+  exit /b 0
+)
+echo   Keep this window open while using the site.
+if "%STARTED_HTTP%"=="0" echo   [note] local server left running, started by another session
+if "%STARTED_SSH%"=="0" echo   [note] ssh tunnel left running, started by another session
+echo   Press any key to stop what this window started.
 echo.
-pause
+pause >nul
+echo.
+call :kill_http
+call :kill_ssh
+echo   stopped.
+"%PING%" -n 2 127.0.0.1 >nul
+exit /b 0
+
+rem ------------------------------------------------------------------ stop
+:STOP
+echo.
+echo   ==== stopping geekbang offline reader ====
+call :kill_http
+call :kill_ssh
+echo   done.
+exit /b 0
+
+rem  Kill the python listener on %PORT% only (never another program).
+:kill_http
+set "FOUND=0"
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /c:":%PORT%" ^| findstr /c:"LISTENING"') do (
+  tasklist /fi "PID eq %%P" 2>nul | findstr /i "python" >nul
+  if not errorlevel 1 (
+    taskkill /f /pid %%P >nul 2>&1
+    if not errorlevel 1 (
+      echo   [http] stopped pid %%P
+      set "FOUND=1"
+    )
+  )
+)
+if "%FOUND%"=="0" echo   [http] no python listener on port %PORT%
+exit /b 0
+
+rem  Kill only ssh processes forwarding %RPORT% -> 127.0.0.1:%PORT%.
+:kill_ssh
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Get-CimInstance Win32_Process -Filter 'Name=''ssh.exe''' | Where-Object { $_.CommandLine -like '*-R %RPORT%:127.0.0.1:%PORT%*' }; if ($p) { $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Write-Host ('  [ssh ] stopped pid ' + $_.ProcessId) } } else { Write-Host '  [ssh ] no matching tunnel process' }"
+exit /b 0

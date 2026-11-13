@@ -1340,19 +1340,39 @@ def parse_args(argv=None):
     return cfg
 
 
+def _data_dir_from_file(root):
+    """读取 <root>/data-dir.txt（UTF-8，单行）里的课程目录。
+
+    Windows 的 .bat 由 cmd 按 OEM 代码页（zh-CN 为 GBK）解码，脚本里写中文
+    路径会让整块命令解析错位；因此路径放在 UTF-8 文本文件里，由 Python 读取。
+    仅作兜底，优先级低于 --data-dir 与 GK_DATA_DIR；文件不存在返回 None。
+    """
+    path = os.path.join(root, "data-dir.txt")
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            value = f.read().strip()
+    except OSError:
+        return None
+    return value.strip('"').strip() or None
+
+
 def create_server(cfg):
     """按 cfg 装配服务。测试与 main 共用。cfg 需含 root/auth_file 等全部字段。"""
     root = os.path.abspath(cfg.root)
-    # 优先级：--data-dir > 环境变量 GK_DATA_DIR > root。
+    # 优先级：--data-dir > 环境变量 GK_DATA_DIR > <root>/data-dir.txt > root。
     # 口令管理子命令不经过这里，因此不必存在课程目录也能设置口令。
     data_arg = getattr(cfg, "data_dir", None)
     if data_arg is None:
         data_arg = os.environ.get("GK_DATA_DIR") or None
+    if data_arg is None:
+        data_arg = _data_dir_from_file(root)
     data_dir = os.path.abspath(data_arg or root)
     if not os.path.isdir(data_dir):
         sys.stderr.write(
             "\n  [data] 课程数据目录不存在：%s\n"
-            "         请用 --data-dir 指定包含各门课程子目录的文件夹\n\n" % data_dir)
+            "         请用 --data-dir 指定包含各门课程子目录的文件夹，\n"
+            "         或把路径写入 %s（UTF-8，一行）\n\n"
+            % (data_dir, os.path.join(root, "data-dir.txt")))
         raise SystemExit(2)
     if not cfg.auth_file:
         cfg.auth_file = os.path.join(root, "auth.json")

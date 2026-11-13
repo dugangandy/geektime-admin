@@ -89,6 +89,8 @@ pip install mutagen markdown pymupdf    # 可选
 
    外部目录里**只放各门课程的子目录**（含各自的 `html/`、`mp3/`、`pdf/`、`reader/` 等）；`catalog.html`、`assets/covers/`、`template/`、`auth.json`、`index.html` 等仍在仓库根目录。课程访问地址始终是 `/<课程名>/...`，服务端会把该前缀映射到数据目录，前端与 Android 客户端无需改动。首次点击「待生成」课程时，`reader/` 会构建到数据目录里对应的课程下。目录不存在时启动会明确报错；`--set-password` 等口令操作不依赖课程目录。
 
+   路径优先级：`--data-dir` > 环境变量 `GK_DATA_DIR` > 仓库根目录的 `data-dir.txt`（UTF-8 单行，仅本地、不入库）> 仓库根目录。中文路径建议写进 `data-dir.txt`：`serve.bat` 必须保持纯 ASCII（cmd 按 GBK 解码批处理，脚本内的中文会让整块命令解析错位），该文件由 Python 以 UTF-8 读取。
+
 2. 可选：放一份 `catalog.html`（官网课程列表存档），用于补作者/头衔/讲数/学习人数等元数据，并为 CLI 提供封面下载地址。缺失时程序仍能运行，只是元数据与封面信息变少。
 3. 可选：给单门课加 `course.json` 覆写元数据：
 
@@ -145,11 +147,12 @@ python serve.py 8888 . --no-auth                        # 仅调试：关闭全�
 
 ### 4. 公网（SSH 反向隧道）
 
-Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（若被 Gatekeeper 拦截，再执行 `xattr -d com.apple.quarantine serve.command`），之后双击 `serve.command`。两者都先启动本地 `127.0.0.1:8888`，再用 `ssh -R 8888:127.0.0.1:8888 root@139.198.29.121` 把端口映射到公网，访问 `http://139.198.29.121:8888/`。
+Windows 双击 `serve.bat`；macOS 首次先执行 `chmod +x serve.command`（若被 Gatekeeper 拦截，再执行 `xattr -d com.apple.quarantine serve.command`），之后双击 `serve.command`。两者都先启动本地 `127.0.0.1:8888`，再用 `ssh -R 8878:127.0.0.1:8888 root@139.198.29.121` 把远端 8878 映射到本地 8888，访问 `http://139.198.29.121:8878/`。
 
-- 远端 sshd 需开启 `GatewayPorts yes`；脚本会清理僵死的 8888 监听（`fuser -k`）并复核远端绑定，失败最多重试 3 次，带 `ExitOnForwardFailure=yes` 与 `ServerAliveInterval=30`。
-- 两个脚本都复用已有的本地 8888 服务，且公网已可达时不动健康隧道。macOS 版额外支持隧道断线自动重连：`MAX_RETRIES=0 ./serve.command` 不限次数，`RETRY_BASE=5 RETRY_MAX_WAIT=60 ./serve.command` 可调退避；按 Ctrl-C 停止。想让它在后台常驻（不占终端），见 [7. 常驻运行：supervisorctl](#7-常驻运行supervisorctlmacos)。
-- 课程目录外置：`serve.bat` / `serve-lan.bat` 顶部改 `set "DATA_DIR=D:\..."`（纯 ASCII，勿写中文注释）；`serve.command` 顶部改 `COURSE_DIR="/Volumes/.../课程"`，或运行时 `GK_DATA_DIR="..." ./serve.command`。三个脚本都支持 `GK_DATA_DIR` 环境变量，留空则使用脚本所在目录；路径不存在时启动前即报错。
+- Windows `serve.bat` 把本地服务与 SSH 隧道都放在**当前窗口**运行（不再额外弹窗），窗口保持打开；按任意键即停止本窗口启动的进程。若服务/隧道是别的会话启动的（脚本会提示 `reused`/`untouched`），用 `serve.bat stop` 强制清理 8888 上的 python 监听与匹配的 8878 隧道进程。
+- 远端 sshd 需开启 `GatewayPorts yes`；脚本会清理僵死的远端 8878 监听（`fuser -k`）并复核远端绑定，失败最多重试 3 次，带 `ExitOnForwardFailure=yes` 与 `ServerAliveInterval=30`。
+- 两个脚本都复用已有的本地 8888 服务，且公网 8878 已可达时不动健康隧道。macOS 版额外支持隧道断线自动重连：`MAX_RETRIES=0 ./serve.command` 不限次数，`RETRY_BASE=5 RETRY_MAX_WAIT=60 ./serve.command` 可调退避；按 Ctrl-C 停止。想让它在后台常驻（不占终端），见 [7. 常驻运行：supervisorctl](#7-常驻运行supervisorctlmacos)。
+- 课程目录外置：`serve.bat` 不写路径，用同目录的 `data-dir.txt`（UTF-8 一行）或 `GK_DATA_DIR`；`serve-lan.bat` 顶部改 `set "DATA_DIR=D:\..."`（纯 ASCII）；`serve.command` 顶部改 `COURSE_DIR="/Volumes/.../课程"`，或运行时 `GK_DATA_DIR="..." ./serve.command`。三个脚本都支持 `GK_DATA_DIR` 环境变量，都没有则使用脚本所在目录；路径不存在时启动前即报错。
 - 课程文件**不上传**到远端，全部由本机服务提供；远端 80 端口是 nginx 默认站，不做反代。
 - 隧道下客户端 IP 恒为 `127.0.0.1`，按 IP 的限流退化为全局限流，切勿对回环地址做免登录豁免。
 - 明文 HTTP、无 TLS，仅建议个人使用；若前置 nginx 反代，可加 `--trust-proxy`。
@@ -181,7 +184,7 @@ tail -f ~/.supervisor/logs/gk-reader.log
 - 程序配置在仓库内 `supervisor/gk-reader.conf`（`autostart=true`、`autorestart=unexpected`、`stopasgroup/killasgroup=true`），通过 `~/.supervisor/conf.d/geektime-admin.conf` 软链接接入主配置的 `[include]`。**不要**往主配置里直接写全路径：supervisor 的 `[include] files` 按空白切分，`Macintosh HD` 里的空格会截断路径。
 - 改完配置执行 `$CTL -c "$CONF" reread && $CTL -c "$CONF" update` 生效；`supervisord` 本身由 LaunchAgent 守护，开机自启，不需要手动拉起。
 - supervisor 只管到 `serve.command` 这一层：本地 8888 服务与 SSH 隧道都是它的子进程，`stop` 会一并收掉；隧道断线仍由脚本内部按指数退避重连，不必重启程序。
-- 若公网 8888 已被别的实例（例如之前双击开的窗口）占用，脚本会打印提示后以 0 退出，`gk-reader` 随后进入 `FATAL`；先停掉那个实例再 `start`。停止时日志里的 `exit status 143` 是 SIGTERM 的正常记录。
+- 若公网 8878 已被别的实例（例如之前双击开的窗口）占用，脚本会打印提示后以 0 退出，`gk-reader` 随后进入 `FATAL`；先停掉那个实例再 `start`。停止时日志里的 `exit status 143` 是 SIGTERM 的正常记录。
 
 ## 首页与按需构建
 
