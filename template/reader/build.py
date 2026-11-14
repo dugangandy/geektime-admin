@@ -878,7 +878,7 @@ def parse_audio_page(task):
 def parse_video_page(task):
     """解析只有视频、没有文字稿的讲次。"""
     return _media_page(task, 'video',
-                       '<p class="empty-body">本讲暂无文字稿，可使用上方视频播放器观看。</p>')
+                       '<p class="empty-body">本讲暂无文字稿。</p>')
 
 
 def parse_page(task):
