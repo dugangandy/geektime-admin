@@ -109,6 +109,22 @@ ASSET_DIRS = ()
 # 能当正文的文件后缀（纯音频目录只能当附件目录，不能当章节）
 TEXT_EXTS = ('.html', '.md', '.pdf')
 
+
+def ext_rank(name):
+    """同一讲有多种格式时的取舍：html > md > PDF > 视频 > 音频（越靠后越当附件）。"""
+    e = os.path.splitext(name)[1].lower()
+    if e == '.html':
+        return 0
+    if e == '.md':
+        return 1
+    if e == '.pdf':
+        return 2
+    if e in VIDEO_EXTS:
+        return 3
+    if e in AUDIO_EXTS:
+        return 4
+    return 9
+
 # 正文容器候选（按优先级）
 CONTENT_SELECTORS = [
     '._1Bj6HN3x_0',                 # 极客时间原站整页保存（旧版）
@@ -347,58 +363,119 @@ def file_label(name, no=None):
     return stem
 
 
+def stem_label(stem):
+    """已是裸 stem（已去掉扩展名）时的显示标题：不再切扩展名，「cunlove.cn】」不会被吃掉。"""
+    m = FILE_NO_RE.match(stem)
+    rest = m.group(2).strip() if m else ''
+    if rest:
+        return '%s | %s' % (m.group(1), rest)
+    return stem
+
+
 def stem_no(stem):
     """文件名开头的讲次序号，取不到返回 None。"""
     m = FILE_NO_RE.match(stem)
     return int(m.group(1)) if m else None
 
 
+def title_parts(stem):
+    """拆出 (栏目前缀, 标题主干)：
+
+    「开篇词｜掌握好学习路径」→ ('开篇词', '掌握好学习路径')
+    「00 课前准备 动手实践」   → ('课前准备', '动手实践')
+    前缀只是栏目名（开篇词/加餐/期末测试…），同一讲的副本常只在这儿不一致。
+    """
+    t = normalize_title(stem_label(stem))
+    t = re.sub(r'【[^】]*】', '', t)             # 下载站的推广后缀不算标题
+    t = re.sub(r'\s+[-–—]\s+', ' | ', t)      # 「结束语 - 标题」也算栏目分隔
+    parts = [p.strip() for p in re.split(r'[|_]', t) if p.strip()]
+    head = parts[0] if len(parts) >= 2 else ''
+    title = parts[-1] if parts else t
+    if head.isdigit():          # 纯编号不算栏目名
+        head = ''
+    if not head and ' ' in title:
+        head, title = re.split(r'\s+', title, 1)
+    return head.strip(), title.strip()
+
+
+def title_key(stem):
+    """标题主干：去掉讲次编号与「开篇词｜」这类栏目前缀，用来认出改名副本。"""
+    return title_parts(stem)[1].replace(' ', '')
+
+
+def label_key(stem):
+    """整条标题（讲次编号 + 标题）归一化，用来按「讲次」而不是「文件名」去重。"""
+    return re.sub(r'\s+', '', normalize_title(stem_label(stem)))
+
+
 def article_files(dir_path):
     """目录下的正文文件：.html 优先，其次 .md，最后才是 .pdf（纯 PDF 课程）。
 
     没有任何文字的讲次按媒体文件成讲：视频（mp4/m4v/webm/mov）优先于音频。
+    同一讲常有多份副本（改了命名、换了格式）：标题一致的其它格式只当附件，
+    序号被多打少打的同格式同理，否则一讲会出两页。
     """
     try:
         names = os.listdir(dir_path)
     except OSError:
         return []
     names = [f for f in names if not f.startswith(('_', '.'))]   # 跳过临时/隐藏文件
-    picked = {os.path.splitext(f)[0]: f for f in names if f.lower().endswith('.md')}
-    picked.update({os.path.splitext(f)[0]: f for f in names if f.lower().endswith('.html')})
-    # PDF：已有同名 html/md 的视为附件；名字对不上的（同一讲命名不一致）也视为附件；
-    # 只有「没有对应 html/md」的 PDF 才单独作为一讲（如只有 PDF 的结束语/问卷）
-    seen = {norm_key(stem) for stem in picked}
-    # 同序号的 PDF 只当附件：下载来的 PDF 常见尾字被多打/少打（如 MapReducel.pdf
-    # 对应 MapReduce.html），按名字归一化对不上，但显然不是新的一讲
-    taken_nos = {n for n in (stem_no(s) for s in picked) if n is not None}
-    for f in names:
-        if not f.lower().endswith('.pdf'):
+
+    picked = {}
+    seen, labels, taken_nos = set(), set(), set()
+    titles = {}                     # 标题主干 -> 已收的格式
+    for f in sorted(names, key=lambda x: (ext_rank(x), x)):
+        r = ext_rank(f)
+        if r == 9:
             continue
-        stem = os.path.splitext(f)[0]
-        if norm_key(stem) in seen or stem_no(stem) in taken_nos:
+        stem, ext = os.path.splitext(f)[0], os.path.splitext(f)[1].lower()
+        tk = title_key(stem)
+        if tk in titles and ext not in titles[tk]:    # 同一讲的另一种格式：附件
             continue
-        picked[stem] = f
-        seen.add(norm_key(stem))
-    # 视频讲次（纯视频课程的主体）：排在音频之前，同一讲既有 mp4 又有 mp3 时取视频
-    for f in names:
-        if os.path.splitext(f)[1].lower() not in VIDEO_EXTS:
+        if r <= 1 and label_key(stem) in labels:      # 同一讲的另一种命名：附件
             continue
-        stem = os.path.splitext(f)[0]
-        if norm_key(stem) in seen or stem_no(stem) in taken_nos:
+        if r >= 2 and stem_no(stem) in taken_nos:     # 序号对得上的附件
+            continue
+        if norm_key(stem) in seen:
             continue
         picked[stem] = f
         seen.add(norm_key(stem))
-    # 只有音频、没有文字的讲次也保留（生成只有播放器的占位页）
-    for f in names:
-        if os.path.splitext(f)[1].lower() not in AUDIO_EXTS:
-            continue
-        stem = os.path.splitext(f)[0]
-        # 同序号的音频同理只当附件：改名副本（分隔符不同、标题带 ×）会让一讲变两讲
-        if norm_key(stem) in seen or stem_no(stem) in taken_nos:
-            continue
-        picked[stem] = f
-        seen.add(norm_key(stem))
+        titles.setdefault(tk, set()).add(ext)
+        if r <= 1:
+            labels.add(label_key(stem))
+            if stem_no(stem) is not None:
+                taken_nos.add(stem_no(stem))
     return sorted(picked.values())
+
+
+def merge_sibling_media(course_dir, files):
+    """像「md/ + PDF/ + MP3/」并列的课程：把只有 PDF/视频、没有正文的讲次并进来。
+
+    这类讲次（期中/期末测试、加餐等）没有 md，PDF 目录里却是完整一讲。
+    同一讲的多份副本（PDF + 音频）只收一份，优先 PDF（有正文）而不是音频占位页。
+    返回绝对路径列表，调用方直接放进章节的 files 里。
+    """
+    stems = [os.path.splitext(os.path.basename(f))[0] for f in files]
+    titles = {title_key(s) for s in stems}
+    nos = {n for n in (stem_no(s) for s in stems) if n is not None}
+    cand = []
+    for name in sorted(os.listdir(course_dir)):
+        p = os.path.join(course_dir, name)
+        if not os.path.isdir(p) or name in SKIP_DIRS or name.startswith(('_', '.')):
+            continue
+        for f in article_files(p):
+            if os.path.splitext(f)[1].lower() in ('.html', '.md'):
+                continue        # 另有正文目录时按章节处理，不在这一层合并
+            cand.append((ext_rank(f), os.path.join(p, f)))
+    extra = []
+    for _, path in sorted(cand):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        tk, no = title_key(stem), stem_no(stem)
+        if tk in titles or (no is not None and no in nos):
+            continue
+        titles.add(tk)
+        extra.append(path)
+    return extra
 
 
 def scan_course(course_dir, content_dir=None):
@@ -457,6 +534,12 @@ def scan_course(course_dir, content_dir=None):
             # 那些目录是附件，不能因为「有 pdf」就把整门课当 PDF 课程。
             if subs_text:
                 subs_text.sort(key=lambda c: (c['no'], c['name']))
+                if len(subs_text) == 1:
+                    # md/ 与 PDF/、MP3/ 并列：只有 PDF 的讲次并进同一章，别丢
+                    extra = merge_sibling_media(course_dir, subs_text[0]['files'])
+                    if extra:
+                        subs_text[0]['files'] += extra
+                        subs_text[0]['name'] = '正文'
                 return subs_text, None
             if len(subs_video) == 1:
                 return [], subs_video[0]    # 只有视频的子目录，整目录当扁平目录
@@ -819,6 +902,10 @@ def parse_page(task):
     soup = BeautifulSoup(raw, 'lxml')
     content = pick_content(soup)
     if content is None:
+        # 网页只存下了评论区之类的残页：同名 PDF 还在就拿 PDF 当正文，别再丢一讲
+        pdf = find_asset(stem, html_dir, root, ('.pdf',))
+        if pdf:
+            return parse_pdf_page((ci, ch_name, pdf, root))
         raise RuntimeError('未找到正文容器: %s' % path)
 
     is_geek = '_1Bj6HN3x_0' in (content.get('class') or [])
