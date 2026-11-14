@@ -6,7 +6,7 @@
 # 与 serve.bat 一致的关键行为：
 #   1) auth.json 缺失时提示设置口令并退出
 #   2) 127.0.0.1:8888 已在监听就复用，绝不重复启动，也不会杀掉已有进程
-#   3) 公网 8878 已可达就不动健康的隧道（否则 fuser -k 会杀掉正在用的会话）
+#   3) 公网 8888 已可达就不动健康的隧道（否则 fuser -k 会杀掉正在用的会话）
 #   4) 建隧道前清理远端僵死监听，建立后用 ss -tln 复核绑定，连续 3 次失败即报错
 #   5) 所有 ssh 走 BatchMode / ConnectTimeout，不会卡在主机指纹确认
 #
@@ -31,7 +31,7 @@ cd "$DIR" || exit 1
 PORT=8888
 REMOTE_USER=root
 REMOTE_HOST=139.198.29.121
-REMOTE_PORT=8878
+REMOTE_PORT=8888
 REMOTE="$REMOTE_USER@$REMOTE_HOST"
 PYTHON="${PYTHON:-python3}"
 SSHOPT=(-o BatchMode=yes -o ConnectTimeout=8)
@@ -172,7 +172,7 @@ echo "  [ssh ] cleaning stale listener on remote:$REMOTE_PORT ..."
 clean_remote || echo "  [warn] 清理失败（可能连不上服务器）"
 sleep 1
 
-# 4) SSH 反向隧道：远端 8878 -> 本地 8888；绑定失败快速重试，断开自动重连
+# 4) SSH 反向隧道：远端 8888 -> 本地 8888；绑定失败快速重试，断开自动重连
 #    ExitOnForwardFailure: 绑定失败立即退出（不再静默）
 #    ServerAlive*: 本机断网/休眠后及时断开，避免远端留下僵死会话
 connect() {

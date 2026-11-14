@@ -72,7 +72,7 @@ class Prefs(ctx: Context) {
         }
 
     companion object {
-        const val DEFAULT_SERVER = "http://139.198.29.121:8878"
+        const val DEFAULT_SERVER = "http://139.198.29.121:8888"
         const val LAN_HINT = "http://192.168.1.8:8888"
     }
 }
