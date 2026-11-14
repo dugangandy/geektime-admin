@@ -135,6 +135,7 @@ DIRECTION_MAP = {
     "LangChain 实战课": "ai",
     "ClaudeCode 工程化实战": "ai",
     "AI大模型系统实战": "ai",
+    "AI大模型之美": "ai",
     # 大数据
     "从0开始学大数据": "bigdata",
     "数据中台实战课": "bigdata",
@@ -278,6 +279,7 @@ CATEGORY_MAP = {
     "郭东白的架构课": "arch",
     "跟着高手学复盘": "life",
     "AI大模型系统实战": "cs",
+    "AI大模型之美": "cs",
     # 2026-11-13 新增
     "Electron开发实战": "front",
     "Web协议详解与抓包实战": "ops",
