@@ -423,6 +423,8 @@ META_OVERRIDE = {
     "玩转Spring全家桶": {"cover_url": "https://static001.geekbang.org/resource/image/b1/bd/b16a3f21e6e615b3403deef8decc7cbd.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
     "玩转git三剑客": {"cover_url": "https://static001.geekbang.org/resource/image/b8/1c/b85e7f6e5c5a42f8dabf1fb1807c971c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
     "算法面试通关40讲": {"cover_url": "https://static001.geekbang.org/resource/image/b9/8c/b952e2172e8cb92364a243507a7f188c.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
+    # 2026-11-14 本地新增（cid=100541001）：官网封面图
+    "AI大模型之美": {"cover_url": "https://static001.geekbang.org/resource/image/7f/b3/7f5faaf3e87d39ac5427391aa694d2b3.jpg?x-oss-process=image/resize,m_fill,w_127,h_167/format,webp"},
 }
 
 
