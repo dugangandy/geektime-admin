@@ -1198,6 +1198,12 @@ def build(course_dir, out_dir, title=None, author=None, role=None,
         raise SystemExit('没有在 %s 找到任何可构建的正文或媒体文件'
                          '（html / md / pdf / mp3 / mp4 等）' % course_dir)
 
+    # 缺 markdown 库时 md 正文会全部解析失败，只会剩媒体占位页，
+    # 生成一个「1 讲」的残缺阅读器；这里直接失败，别让产物看起来是好的。
+    if _markdown is None and any(t[2].lower().endswith('.md') for t in tasks):
+        raise SystemExit('缺少 markdown 库，无法渲染 .md 正文；'
+                         '请先执行：%s -m pip install markdown' % sys.executable)
+
     if not quiet:
         print('课程目录: %s' % course_dir)
         print('布局: %s · %d 组 · %d 讲'
