@@ -16,11 +16,11 @@
       "learners_text": "8.1万人已学习"
     },
     {
-      "name": "机器学习40讲（完结）",
+      "name": "机器学习40讲",
       "dir": "ai",
       "state": "done",
-      "href": "机器学习40讲（完结）/reader/index.html",
-      "cover": "机器学习40讲_完结.webp",
+      "href": "机器学习40讲/reader/index.html",
+      "cover": "机器学习40讲.webp",
       "badge": "",
       "author": "王天一",
       "identity": "工学博士，副教授",
